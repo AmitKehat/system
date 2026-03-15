@@ -126,11 +126,59 @@ CODING RULES (STRICT):
 - POSITION MANAGEMENT (CRITICAL):
   1. To go long, use `self.buy()`.
   2. When the user says "sell", they almost ALWAYS mean "close my existing position". To close a position and return to cash, you MUST use `self.position.close()`.
-  3. NEVER use `self.sell()` unless the user explicitly types the words "short" or "short selling". 
+  3. NEVER use `self.sell()` unless the user explicitly types the words "short" or "short selling".
 - IMPORTS: `Strategy`, `pandas`, `numpy`, and indicators like `SMA` are ALREADY imported in the environment! DO NOT import them. You may ONLY import standard Python libraries (e.g., `from datetime import timedelta`) if absolutely necessary.
 - DO NOT include data fetching or Backtest() calls. ONLY output the CustomStrategy class.
-- DATETIME LOGIC: Extract the current bar's datetime using self.data.index[-1]. Example: current_dt = self.data.index[-1] then check if current_dt.month == 8 and current_dt.day >= 15:
-- STATE FLAGS: If making a one-time seasonal trade, initialize a boolean flag in def init(self): (e.g., self.bought_this_year = False) and reset it when appropriate.
+
+DATETIME AND CALENDAR LOGIC (CRITICAL):
+- Extract the current bar's datetime using: current_dt = self.data.index[-1]
+- For checking day of month: current_dt.day
+- For checking month: current_dt.month
+- For checking day of week: current_dt.weekday() (0=Monday, 4=Friday)
+
+HANDLING NON-TRADING DAYS (weekends/holidays):
+- Markets are closed on weekends and holidays, so the exact date (e.g., "2nd of month") may not exist in data.
+- Use RANGE-BASED CHECKS instead of exact day matches:
+  - BAD:  if current_dt.day == 2:  # May miss if 2nd is a weekend
+  - GOOD: if 1 <= current_dt.day <= 3:  # Catches first trading day near the 2nd
+- For "buy on day X, sell on day Y" strategies, track state to ensure you only act once per period.
+
+RECURRING TRADES (monthly/weekly patterns):
+- For MONTHLY recurring strategies, track state per month using (year, month) tuples:
+  ```python
+  def init(self):
+      self.last_action_month = None  # Track (year, month) of last action
+
+  def next(self):
+      current_dt = self.data.index[-1]
+      current_month = (current_dt.year, current_dt.month)
+
+      # Buy around the 2nd of each month (handle weekends: check day 1-3)
+      if 1 <= current_dt.day <= 3 and not self.position:
+          if self.last_action_month != current_month:
+              self.buy()
+              self.last_action_month = current_month
+
+      # Sell around the 28th of each month (handle weekends: check day 27-31)
+      if current_dt.day >= 27 and self.position:
+          self.position.close()
+  ```
+
+- For WEEKLY recurring strategies, use weekday checks:
+  ```python
+  # Buy on Monday (weekday 0), sell on Friday (weekday 4)
+  if current_dt.weekday() == 0 and not self.position:
+      self.buy()
+  if current_dt.weekday() == 4 and self.position:
+      self.position.close()
+  ```
+
+STATE FLAGS:
+- ONE-TIME trades (e.g., "buy in January 2024"): Use a simple boolean flag.
+- YEARLY recurring (e.g., "buy every January"): Track self.last_action_year.
+- MONTHLY recurring (e.g., "buy on 2nd, sell on 28th every month"): Track self.last_buy_month and self.last_sell_month as (year, month) tuples.
+- WEEKLY recurring: Usually no state needed, just check weekday.
+- ALWAYS check position state: use `if not self.position` before buying, `if self.position` before selling.
 """
     
     messages = [{"role": "system", "content": system_prompt}]
