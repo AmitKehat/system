@@ -1,0 +1,57 @@
+/* src/App.css */
+
+/* Ensures the icon, symbol, and name line up perfectly horizontally */
+.symbol-search-item {
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: nowrap !important;
+  align-items: center !important;
+  gap: 12px !important; /* Spacing between logo and text */
+}
+
+/* The rounded ticker photo/icon */
+.symbol-search-icon {
+  width: 32px !important;
+  height: 32px !important;
+  border-radius: 50% !important; /* Circular */
+  background-color: var(--tv-color-popup-background, #1e222d);
+  background-size: cover;
+  background-position: center;
+  border: 1px solid var(--tv-color-border, #2a2e39);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: bold;
+  font-size: 14px;
+  color: var(--tv-color-text-secondary, #787b86);
+  flex-shrink: 0;
+}
+
+/* Container for Ticker + Company Name */
+.symbol-search-item-main {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: flex-start !important;
+  gap: 2px !important;
+}
+
+/* Ticker Symbol (e.g. AAPL) */
+.symbol-search-symbol {
+  font-weight: 700 !important;
+  font-size: 14px !important;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--tv-color-text-primary, #e0e3eb);
+}
+
+/* Full Company Name (e.g. Apple Inc.) */
+.symbol-search-company-name {
+  font-size: 11px !important;
+  color: var(--tv-color-text-secondary, #787b86);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px; 
+  display: block !important;
+}

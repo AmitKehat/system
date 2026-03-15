@@ -1,0 +1,230 @@
+/* src/components/StatusBar/StatusBar.css */
+.status-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px;
+    height: 32px;
+    background: var(--tv-color-toolbar-bg, #1e222d);
+    border-bottom: 1px solid var(--tv-color-border, #2a2e39);
+    font-size: 12px;
+}
+
+.status-indicators {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+  
+.status-indicator {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    position: relative;
+    transition: background 0.15s;
+}
+  
+.status-indicator:hover {
+    background: var(--tv-color-popup-hover, rgba(255, 255, 255, 0.05));
+}
+
+.status-disconnect-btn {
+    background: transparent;
+    border: 1px solid var(--tv-color-border, #2a2e39);
+    color: var(--tv-color-text-secondary, #787b86);
+    border-radius: 4px;
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.status-disconnect-btn:hover {
+    color: #f23645;
+    border-color: #f23645;
+    background: rgba(242, 54, 69, 0.1);
+}
+  
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+  
+.status-dot.large {
+    width: 12px;
+    height: 12px;
+}
+  
+.status-dot.pulse {
+    animation: pulse 2s infinite;
+}
+  
+@keyframes pulse {
+    0%, 100% {
+      opacity: 1;
+      box-shadow: 0 0 0 0 currentColor;
+    }
+    50% {
+      opacity: 0.7;
+      box-shadow: 0 0 0 4px transparent;
+    }
+}
+  
+.status-title {
+    color: var(--tv-color-text, #d1d4dc);
+    font-weight: 500;
+}
+  
+/* Popup Styles */
+.status-popup {
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
+    min-width: 300px;
+    background: var(--tv-color-popup-background, #1e222d);
+    border: 1px solid var(--tv-color-border, #2a2e39);
+    border-radius: 8px;
+    padding: 16px;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+    z-index: 1000;
+}
+  
+.popup-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+}
+  
+.popup-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--tv-color-text, #d1d4dc);
+}
+  
+.popup-detail {
+    color: var(--tv-color-text-secondary, #787b86);
+    font-size: 13px;
+    line-height: 1.5;
+    margin: 0 0 16px 0;
+}
+  
+.popup-detail strong {
+    color: var(--tv-color-text, #d1d4dc);
+    font-weight: 600;
+}
+  
+/* Market Hours Bar */
+.market-hours-bar {
+    margin: 16px 0;
+}
+  
+.day-label {
+    display: block;
+    font-size: 11px;
+    color: var(--tv-color-text-tertiary, #787b86);
+    margin-bottom: 8px;
+    font-weight: 500;
+    letter-spacing: 0.5px;
+}
+  
+.hours-track {
+    display: flex;
+    height: 8px;
+    border-radius: 4px;
+    overflow: hidden;
+    background: var(--tv-color-border, #2a2e39);
+}
+  
+.hour-segment {
+    height: 100%;
+}
+  
+.hour-segment.pre-market {
+    width: 34.375%;
+    background: #f7931a;
+    opacity: 0.7;
+}
+  
+.hour-segment.regular {
+    width: 40.625%;
+    background: #089981;
+}
+  
+.hour-segment.post-market {
+    width: 25%;
+    background: #f7931a;
+    opacity: 0.7;
+}
+  
+.hours-labels {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--tv-color-text-secondary, #b2b5be);
+    font-weight: 500;
+}
+  
+.popup-footer {
+    font-size: 11px;
+    color: var(--tv-color-text-tertiary, #5d606b);
+    padding-top: 12px;
+    border-top: 1px solid var(--tv-color-border, #2a2e39);
+}
+  
+.popup-info {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    padding: 8px 0;
+}
+  
+.info-label {
+    color: var(--tv-color-text-tertiary, #5d606b);
+}
+  
+.info-value {
+    color: var(--tv-color-text, #d1d4dc);
+    font-weight: 500;
+}
+  
+/* Current Time Indicator */
+.hours-track-container {
+    position: relative;
+    width: 100%;
+    padding-top: 12px;
+}
+  
+.current-time-indicator {
+    position: absolute;
+    top: 0;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    z-index: 10;
+}
+  
+.time-arrow {
+    width: 0;
+    height: 0;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-top: 8px solid #ffffff;
+    filter: drop-shadow(0 1px 2px rgba(0,0,0,0.3));
+}
+  
+.time-line {
+    width: 2px;
+    height: 20px;
+    background: #ffffff;
+    margin-top: -1px;
+    box-shadow: 0 0 4px rgba(255,255,255,0.5);
+}

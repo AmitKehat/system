@@ -1,0 +1,254 @@
+/* src/components/Login/LoginScreen.css */
+.login-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  background-color: #131722;
+  color: #d1d4dc;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}
+
+.ib-logo-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 30px;
+}
+
+.ib-logo-icon {
+  width: 32px;
+  height: 32px;
+  background-color: #d32f2f;
+  border-radius: 4px;
+  position: relative;
+}
+
+.ib-logo-icon::after {
+  content: '';
+  position: absolute;
+  bottom: 6px;
+  right: 6px;
+  width: 12px;
+  height: 12px;
+  border-right: 3px solid white;
+  border-bottom: 3px solid white;
+}
+
+.ib-logo-header h1 {
+  font-size: 24px;
+  font-weight: 600;
+  margin: 0;
+  letter-spacing: 0.5px;
+}
+
+.login-card {
+  background-color: #1e222d;
+  border: 1px solid #2a2e39;
+  border-radius: 8px;
+  width: 100%;
+  max-width: 400px;
+  padding: 30px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+}
+
+.login-card-header {
+  margin-bottom: 24px;
+}
+
+.login-card-header h2 {
+  margin: 0 0 20px 0;
+  font-size: 20px;
+  text-align: center;
+}
+
+/* Toggle Switch Styles */
+.mode-toggle {
+  display: flex;
+  background: #131722;
+  border-radius: 6px;
+  padding: 4px;
+  border: 1px solid #2a2e39;
+}
+
+.mode-btn {
+  flex: 1;
+  padding: 8px 0;
+  border: none;
+  background: transparent;
+  color: #787b86;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.mode-btn.active {
+  color: #ffffff;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+}
+
+.mode-btn.active.paper {
+  background: #2962ff;
+}
+
+.mode-btn.active.live {
+  background: #d32f2f;
+}
+
+/* Form Styles */
+.form-group {
+  margin-bottom: 20px;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: #b2b5be;
+  font-weight: 500;
+}
+
+.form-group input {
+  width: 100%;
+  padding: 12px;
+  background-color: #131722;
+  border: 1px solid #2a2e39;
+  border-radius: 6px;
+  color: #d1d4dc;
+  font-size: 14px;
+  box-sizing: border-box;
+  transition: border-color 0.2s;
+}
+
+.form-group input:focus {
+  outline: none;
+  border-color: #2962ff;
+}
+
+.password-input-wrap {
+  position: relative;
+}
+
+.toggle-password {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  color: #787b86;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.toggle-password:hover {
+  color: #d1d4dc;
+}
+
+.submit-btn {
+  width: 100%;
+  padding: 14px;
+  background-color: #2962ff;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 10px;
+  transition: background-color 0.2s;
+}
+
+.submit-btn:hover:not(:disabled) {
+  background-color: #1e53e5;
+}
+
+.submit-btn:disabled {
+  background-color: #2a2e39;
+  color: #787b86;
+  cursor: not-allowed;
+}
+
+.login-error {
+  background-color: rgba(242, 54, 69, 0.1);
+  border: 1px solid rgba(242, 54, 69, 0.5);
+  color: #f23645;
+  padding: 12px;
+  border-radius: 6px;
+  margin-bottom: 20px;
+  font-size: 13px;
+  text-align: center;
+}
+
+.login-footer {
+  margin-top: 24px;
+  text-align: center;
+  border-top: 1px solid #2a2e39;
+  padding-top: 20px;
+}
+
+.login-footer p {
+  margin: 4px 0;
+  font-size: 11px;
+  color: #787b86;
+}
+
+/* Loading / 2FA Screen */
+.reboot-screen {
+  text-align: center;
+  max-width: 400px;
+  padding: 40px;
+}
+
+.reboot-screen h2 {
+  margin: 20px 0 10px 0;
+  font-size: 22px;
+}
+
+.reboot-screen p {
+  color: #b2b5be;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.reboot-screen .sub-text {
+  font-size: 12px;
+  color: #787b86;
+  margin-top: 15px;
+}
+
+.spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid #2a2e39;
+  border-top-color: #2962ff;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin: 0 auto;
+}
+
+.small-spinner {
+  width: 24px;
+  height: 24px;
+  border-width: 2px;
+  margin-top: 20px;
+}
+
+.two-fa-icon {
+  font-size: 64px;
+  animation: bounce 2s infinite ease-in-out;
+  margin-bottom: 20px;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes bounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-15px); }
+}

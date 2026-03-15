@@ -1,0 +1,671 @@
+--- START OF src/api/simulator.py ---
+
+import os
+import re
+import json
+import traceback
+import requests
+import math
+import pandas as pd
+import yfinance as yf
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+from typing import List, Dict, Any, Optional
+from backtesting import Backtest, Strategy
+from datetime import datetime
+
+router = APIRouter()
+
+class Message(BaseModel):
+    role: str
+    content: str
+
+class SimulatorRequest(BaseModel):
+    symbol: str
+    mode: str
+    prompt: str
+    chat_history: List[Message]
+    parameters: Dict[str, Any]
+    llm_provider: str
+    api_key: str
+
+def safe_float(v):
+    """Safely convert any NumPy/Pandas numeric to a standard Python float to prevent JSON Network Errors."""
+    if pd.isna(v) or pd.isnull(v): 
+        return 0.0
+    try:
+        val = float(v)
+        if math.isnan(val) or math.isinf(val):
+            return 0.0
+        return round(val, 4)
+    except:
+        return 0.0
+
+def call_llm(provider: str, api_key: str, messages: List[Dict[str, str]]) -> str:
+    if provider == "openai":
+        url = "https://api.openai.com/v1/chat/completions"
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+        payload = {"model": "gpt-4o", "messages": messages, "temperature": 0.3}
+        res = requests.post(url, headers=headers, json=payload)
+        res.raise_for_status()
+        return res.json()["choices"][0]["message"]["content"]
+        
+    elif provider == "anthropic":
+        url = "https://api.anthropic.com/v1/messages"
+        headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01", "Content-Type": "application/json"}
+        system_msg = next((m["content"] for m in messages if m["role"] == "system"), "")
+        user_msgs = [m for m in messages if m["role"] != "system"]
+        payload = {"model": "claude-3-5-sonnet-20240620", "max_tokens": 2048, "system": system_msg, "messages": user_msgs, "temperature": 0.3}
+        res = requests.post(url, headers=headers, json=payload)
+        res.raise_for_status()
+        return res.json()["content"][0]["text"]
+        
+    elif provider == "gemini":
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key={api_key}"
+        headers = {"Content-Type": "application/json"}
+        gemini_msgs = [{"role": "user" if m["role"] in ["user", "system"] else "model", "parts": [{"text": m["content"]}]} for m in messages]
+        payload = {"contents": gemini_msgs}
+        res = requests.post(url, headers=headers, json=payload)
+        res.raise_for_status()
+        return res.json()["candidates"][0]["content"]["parts"][0]["text"]
+        
+    raise ValueError("Unsupported LLM Provider")
+
+@router.post("/run")
+async def run_simulation(req: SimulatorRequest):
+    if not req.api_key:
+        raise HTTPException(status_code=400, detail="API Key is required.")
+
+    system_prompt = f"""
+    You are an expert quantitative trading assistant. 
+    Your goal is to help the user design and refine a trading strategy.
+    
+    CRITICAL RULE: DO NOT mention the underlying Python libraries, frameworks, or code (like `backtesting`, `pandas`, etc.) in your conversation.
+
+    CURRENT BACKTEST PARAMETERS (Configured by user in the UI):
+    - Target Symbol: {req.symbol}
+    - Date Range: {req.parameters.get('startDate')} to {req.parameters.get('endDate')}
+    - Initial Capital: ${req.parameters.get('initialCapital')}
+    - Commission: {req.parameters.get('commission')} (as a fraction)
+
+    PARAMETER EDITING:
+    If the user explicitly asks to change parameters (e.g., "change initial capital to 50000" or "set date to 2024-01-01"), you MUST output a JSON block wrapped in ```json ... ``` with ONLY the updated keys. 
+    Valid keys: "startDate" (YYYY-MM-DD), "endDate" (YYYY-MM-DD), "initialCapital" (number), "commission" (number).
+    You MUST ALSO output conversational text acknowledging the change. Do not output only JSON.
+
+    WORKFLOW:
+    1. Converse with the user to understand their desired strategy rules.
+    2. BEFORE writing any code, you MUST present a summary of the strategy AND the current parameters.
+    3. Ask the user for explicit approval: "Should I run this backtest now?"
+    4. ONLY when the user explicitly approves (e.g., "yes", "run it", "go ahead"), output the Python code wrapped in ```python ... ```.
+
+    CODING RULES (when approved, invisible to user):
+    - You MUST create a class named `CustomStrategy` that inherits from `Strategy`.
+    - Use `self.data.Close`, `self.data.Open`, etc. 
+    - Use `self.buy()`, `self.sell()`, `self.position.is_long`, etc.
+    - DO NOT include data fetching or `Backtest()` execution calls. Only output the imports and the class.
+    
+    INDICATOR RULES (CRITICAL):
+    - The environment ALREADY provides `SMA(values, n)`, `EMA(values, n)`, and `RSI(values, n)`. You can use them directly like `self.ema = self.I(EMA, self.data.Close, 30)`. DO NOT redefine them.
+    - For ANY OTHER indicator (e.g., Bollinger Bands, MACD), you MUST define a helper function BEFORE the strategy class.
+    - Inside your helper functions, `values` will be a NumPy array. You MUST wrap inputs in `pd.Series(values)` before applying pandas methods.
+    """
+    
+    messages = [{"role": "system", "content": system_prompt}]
+    for msg in req.chat_history:
+        messages.append({"role": msg.role, "content": msg.content})
+    messages.append({"role": "user", "content": req.prompt})
+
+    try:
+        llm_response = call_llm(req.llm_provider, req.api_key, messages)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"LLM API Error: {str(e)}")
+
+    param_update = None
+    json_match = re.search(r'```json(.*?)```', llm_response, re.DOTALL)
+    if json_match:
+        try:
+            param_update = json.loads(json_match.group(1).strip())
+            llm_response = re.sub(r'```json.*?```', '', llm_response, flags=re.DOTALL).strip()
+            if not llm_response:
+                llm_response = "I have updated the parameters. Should I run the backtest now?"
+        except:
+            pass
+
+    code_match = re.search(r'```python(.*?)```', llm_response, re.DOTALL)
+    if not code_match:
+        return {"status": "chat_reply", "message": llm_response, "param_update": param_update}
+    
+    strategy_code = code_match.group(1).strip()
+
+    try:
+        start_date = req.parameters.get("startDate", "2023-01-01")
+        end_date = req.parameters.get("endDate", datetime.today().strftime('%Y-%m-%d'))
+        df = yf.download(req.symbol, start=start_date, end=end_date, progress=False)
+        if df.empty:
+            raise ValueError(f"No data fetched for {req.symbol}")
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Data fetch error: {str(e)}")
+
+    exec_env = {}
+    setup_code = """
+import pandas as pd
+import numpy as np
+from backtesting import Strategy
+from backtesting.lib import crossover
+
+def SMA(values, n):
+    return pd.Series(values).rolling(n).mean()
+
+def EMA(values, n):
+    return pd.Series(values).ewm(span=n, adjust=False).mean()
+
+def RSI(values, n):
+    delta = pd.Series(values).diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=n).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=n).mean()
+    rs = gain / loss
+    return 100 - (100 / (1 + rs))
+"""
+    try:
+        exec(setup_code, exec_env, exec_env)
+        exec(strategy_code, exec_env, exec_env)
+        CustomStrategy = exec_env.get("CustomStrategy")
+        if not CustomStrategy:
+            raise ValueError("LLM did not produce a class named 'CustomStrategy'")
+    except Exception as e:
+        error_msg = f"Failed to compile strategy code.\nError: {str(e)}\n\nCode generated:\n{strategy_code}"
+        return {"status": "error", "message": error_msg, "param_update": param_update}
+
+    try:
+        cash = float(req.parameters.get("initialCapital", 100000))
+        comm = float(req.parameters.get("commission", 0.0))
+        
+        bt = Backtest(df, CustomStrategy, cash=cash, commission=comm, exclusive_orders=True)
+        stats = bt.run()
+        
+        trades_df = stats['_trades']
+        if trades_df.empty:
+            return {"status": "error", "message": "The strategy successfully compiled, but it executed 0 trades over the selected period.", "param_update": param_update}
+
+        trade_markers = []
+        
+        # Build Equity Curve sequentially by Trade Number (1, 2, 3...)
+        current_equity = cash
+        equity_data = [{"time": 1, "value": current_equity}]
+        
+        for idx, row in trades_df.iterrows():
+            size = int(row['Size'])
+            direction = "Buy" if size > 0 else "Sell"
+            
+            trade_markers.append({
+                "time": int(row['EntryTime'].timestamp()),
+                "type": direction,
+                "price": safe_float(row['EntryPrice']),
+                "size": abs(size)
+            })
+            trade_markers.append({
+                "time": int(row['ExitTime'].timestamp()),
+                "type": "Exit",
+                "price": safe_float(row['ExitPrice']),
+                "pnl": safe_float(row['PnL']),
+                "size": abs(size)
+            })
+            
+            current_equity += safe_float(row['PnL'])
+            equity_data.append({"time": int(idx) + 2, "value": current_equity})
+
+        return {
+            "status": "success",
+            "message": "Strategy executed successfully.",
+            "code": strategy_code,
+            "param_update": param_update,
+            "results": {
+                "return_pct": safe_float(stats.get('Return [%]', 0.0)),
+                "win_rate": safe_float(stats.get('Win Rate [%]', 0.0)),
+                "max_drawdown": safe_float(stats.get('Max. Drawdown [%]', 0.0)),
+                "sharpe": safe_float(stats.get('Sharpe Ratio', 0.0)),
+                "profit_factor": safe_float(stats.get('Profit Factor', 0.0)),
+                "total_trades": int(stats.get('# Trades', 0)),
+                "trades": trade_markers,
+                "equity_curve": equity_data
+            }
+        }
+
+    except Exception as e:
+        return {"status": "error", "message": f"Backtest execution error: {traceback.format_exc()}", "param_update": param_update}
+
+--- END OF src/api/simulator.py ---
+
+--- START OF src/api/main.py ---
+
+from __future__ import annotations
+
+import os
+from datetime import date, datetime
+
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, ConfigDict
+
+from src.api.ib import router as ib_router
+from src.api.portfolio import router as portfolio_router
+from src.api.websocket import router as ws_router
+from src.api.watchlist import router as watchlist_router
+from src.common.schemas import RunConfig
+from src.engine.validate import validate_config
+from src.storage.db import get_session, get_engine
+from src.storage.models import Base
+from src.storage import repo
+from src.storage.write_repo import cleanup_stale_running, create_run
+from src.worker.tasks import run_backtest_task
+
+from src.api import simulator
+# -----------------------------------------------------------------------------
+# App
+# -----------------------------------------------------------------------------
+
+app = FastAPI(title="Trading Simulation Platform API")
+
+# Automatically initialize Database Tables for Watchlists
+Base.metadata.create_all(bind=get_engine())
+
+# CORS (must be registered BEFORE routers)
+cors_origins = os.getenv(
+    "CORS_ORIGINS",
+    "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000",
+).split(",")
+
+cors_origins = [o.strip() for o in cors_origins if o.strip()]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Routers (registered AFTER CORS middleware)
+app.include_router(ib_router, prefix="/ib", tags=["ib"])
+app.include_router(portfolio_router)  # Already has prefix="/portfolio"
+app.include_router(ws_router, tags=["websocket"])
+app.include_router(watchlist_router, prefix="/watchlists", tags=["watchlist"])
+app.include_router(simulator.router, prefix="/api/simulator", tags=["Simulator"])
+
+# -----------------------------------------------------------------------------
+# Response Schemas
+# -----------------------------------------------------------------------------
+
+class RunOut(BaseModel):
+    id: str
+    created_at: datetime
+    name: str
+    status: str
+    source: str
+    folder: str | None
+    config_json: dict
+
+    fills_count: int
+    trades_count: int
+    has_equity: bool
+
+    error: str | None = None
+    progress_current: int | None = None
+    progress_total: int | None = None
+    progress_msg: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class FillOut(BaseModel):
+    d: date
+    symbol: str
+    qty: float
+    price: float
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TradeOut(BaseModel):
+    symbol: str
+    entry_date: date
+    exit_date: date
+    qty: float
+    entry_price: float
+    exit_price: float
+    pnl: float
+    pnl_pct: float
+    model_config = ConfigDict(from_attributes=True)
+
+
+class EquityOut(BaseModel):
+    d: date
+    equity: float
+    model_config = ConfigDict(from_attributes=True)
+
+
+# -----------------------------------------------------------------------------
+# Health
+# -----------------------------------------------------------------------------
+
+@app.get("/health")
+def health():
+    return {"ok": True}
+
+
+# -----------------------------------------------------------------------------
+# Runs
+# -----------------------------------------------------------------------------
+
+@app.get("/runs", response_model=list[RunOut])
+def runs(limit: int = 50):
+    session = get_session()
+    try:
+        rows = repo.list_runs(session, limit=limit)
+        out: list[dict] = []
+        for run in rows:
+            c = repo.counts_for_run(session, run.id)
+            out.append(
+                {
+                    "id": run.id,
+                    "created_at": run.created_at,
+                    "name": run.name,
+                    "status": run.status,
+                    "source": run.source,
+                    "folder": run.folder,
+                    "config_json": run.config_json,
+                    "error": getattr(run, "error", None),
+                    "progress_current": getattr(run, "progress_current", None),
+                    "progress_total": getattr(run, "progress_total", None),
+                    "progress_msg": getattr(run, "progress_msg", None),
+                    **c,
+                }
+            )
+        return out
+    finally:
+        session.close()
+
+
+@app.get("/runs/{run_id}", response_model=RunOut)
+def run(run_id: str):
+    session = get_session()
+    try:
+        run = repo.get_run(session, run_id)
+        if not run:
+            raise HTTPException(status_code=404, detail="Run not found")
+        c = repo.counts_for_run(session, run.id)
+        return {
+            "id": run.id,
+            "created_at": run.created_at,
+            "name": run.name,
+            "status": run.status,
+            "source": run.source,
+            "folder": run.folder,
+            "config_json": run.config_json,
+            "error": getattr(run, "error", None),
+            "progress_current": getattr(run, "progress_current", None),
+            "progress_total": getattr(run, "progress_total", None),
+            "progress_msg": getattr(run, "progress_msg", None),
+            **c,
+        }
+    finally:
+        session.close()
+
+
+@app.get("/runs/{run_id}/status")
+def run_status(run_id: str):
+    session = get_session()
+    try:
+        run = repo.get_run(session, run_id)
+        if not run:
+            raise HTTPException(status_code=404, detail="Run not found")
+        return {
+            "id": run.id,
+            "status": run.status,
+            "error": getattr(run, "error", None),
+            "progress_current": getattr(run, "progress_current", None),
+            "progress_total": getattr(run, "progress_total", None),
+            "progress_msg": getattr(run, "progress_msg", None),
+        }
+    finally:
+        session.close()
+
+
+@app.get("/runs/{run_id}/report")
+def run_report(run_id: str):
+    session = get_session()
+    try:
+        run = repo.get_run(session, run_id)
+        if not run:
+            raise HTTPException(status_code=404, detail="Run not found")
+        text = repo.get_report_raw(session, run_id)
+        if text is None:
+            raise HTTPException(status_code=404, detail="Report not found")
+        return {"run_id": run_id, "text": text}
+    finally:
+        session.close()
+
+
+@app.get("/runs/{run_id}/fills", response_model=list[FillOut])
+def run_fills(run_id: str):
+    session = get_session()
+    try:
+        run = repo.get_run(session, run_id)
+        if not run:
+            raise HTTPException(status_code=404, detail="Run not found")
+        return repo.get_fills(session, run_id)
+    finally:
+        session.close()
+
+
+@app.get("/runs/{run_id}/trades", response_model=list[TradeOut])
+def run_trades(run_id: str):
+    session = get_session()
+    try:
+        run = repo.get_run(session, run_id)
+        if not run:
+            raise HTTPException(status_code=404, detail="Run not found")
+        return repo.get_trades(session, run_id)
+    finally:
+        session.close()
+
+
+@app.get("/runs/{run_id}/equity", response_model=list[EquityOut])
+def run_equity(run_id: str):
+    session = get_session()
+    try:
+        run = repo.get_run(session, run_id)
+        if not run:
+            raise HTTPException(status_code=404, detail="Run not found")
+        return repo.get_equity(session, run_id)
+    finally:
+        session.close()
+
+
+# -----------------------------------------------------------------------------
+# Create Backtest (enqueue)
+# -----------------------------------------------------------------------------
+
+@app.post("/backtests")
+def create_backtest(cfg: RunConfig):
+    try:
+        validate_config(cfg)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    session = get_session()
+    try:
+        run = create_run(session, name=cfg.run_name, config_json=cfg.model_dump())
+        run_id = run.id
+        session.commit()
+    except Exception as e:
+        session.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        session.close()
+
+    run_backtest_task.delay(run_id, cfg.model_dump())
+    return {"run_id": run_id, "status": "QUEUED"}
+
+
+# -----------------------------------------------------------------------------
+# Admin
+# -----------------------------------------------------------------------------
+
+@app.post("/admin/runs/cleanup_stale")
+def admin_cleanup_stale():
+    session = get_session()
+    try:
+        n = cleanup_stale_running(session)
+        session.commit()
+        return {"cleaned": n}
+    finally:
+        session.close()
+
+--- END OF src/api/main.py ---
+
+--- START OF docker-compose.yml ---
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: trading_postgres
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7
+    container_name: trading_redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # --- IMMORTAL PAPER ENGINE ---
+  ibgateway_paper:
+    image: ghcr.io/gnzsnz/ib-gateway:stable
+    container_name: trading_ibgateway_paper
+    environment:
+      TWS_USERID: ${IB_PAPER_USER}
+      TWS_PASSWORD: ${IB_PAPER_PASS}
+      TRADING_MODE: paper
+      VNC_SERVER_PASSWORD: ${IB_PAPER_VNC_PASSWORD}
+      TWOFA_TIMEOUT_ACTION: restart
+      RELOGIN_AFTER_TWOFA_TIMEOUT: "yes"
+      READ_ONLY_API: "no"
+    ports:
+      - "4004:4004" # Socat proxy port for Paper
+      - "5902:5900" # VNC port for Paper
+    restart: always
+
+  ib_runner_paper:
+    build: .
+    container_name: trading_ib_runner_paper
+    command: python -m src.ib.runner_daemon
+    environment:
+      IB_HOST: ibgateway_paper
+      IB_PORT: 4004 # Connect to Socat proxy
+      IB_CMD_STREAM: ib:cmd:paper
+      IB_REPLY_PREFIX: "ib:reply:paper:"
+      IB_STATUS_KEY: "ib:status:paper"
+      IB_BARS_PREFIX: "ib:bars:paper:"
+      REDIS_URL: redis://${REDIS_HOST:-redis}:${REDIS_PORT:-6379}/0
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: always
+
+  # --- IMMORTAL LIVE ENGINE ---
+  ibgateway_live:
+    image: ghcr.io/gnzsnz/ib-gateway:stable
+    container_name: trading_ibgateway_live
+    environment:
+      TWS_USERID: ${IB_LIVE_USER}
+      TWS_PASSWORD: ${IB_LIVE_PASS}
+      TRADING_MODE: live
+      VNC_SERVER_PASSWORD: ${IB_LIVE_VNC_PASSWORD}
+      TWOFA_TIMEOUT_ACTION: restart
+      RELOGIN_AFTER_TWOFA_TIMEOUT: "yes"
+      READ_ONLY_API: "no"
+    ports:
+      - "4003:4003" # Socat proxy port for Live
+      - "5901:5900" # VNC port for Live
+    restart: always
+
+  ib_runner_live:
+    build: .
+    container_name: trading_ib_runner_live
+    command: python -m src.ib.runner_daemon
+    environment:
+      IB_HOST: ibgateway_live
+      IB_PORT: 4003 # Connect to Socat proxy
+      IB_CMD_STREAM: ib:cmd:live
+      IB_REPLY_PREFIX: "ib:reply:live:"
+      IB_STATUS_KEY: "ib:status:live"
+      IB_BARS_PREFIX: "ib:bars:live:"
+      REDIS_URL: redis://${REDIS_HOST:-redis}:${REDIS_PORT:-6379}/0
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: always
+
+  # --- WEB API ---
+  api:
+    build: .
+    container_name: trading_api
+    command: uvicorn src.api.main:app --host 0.0.0.0 --port 8000
+    environment:
+      DATABASE_URL: postgresql+psycopg://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}
+      REDIS_URL: redis://${REDIS_HOST:-redis}:${REDIS_PORT:-6379}/0
+      CELERY_BROKER_URL: redis://${REDIS_HOST:-redis}:${REDIS_PORT:-6379}/0
+      CELERY_RESULT_BACKEND: redis://${REDIS_HOST:-redis}:${REDIS_PORT:-6379}/1
+      IB_PAPER_USER: ${IB_PAPER_USER}
+      IB_PAPER_PASS: ${IB_PAPER_PASS}
+      IB_LIVE_USER: ${IB_LIVE_USER}
+      IB_LIVE_PASS: ${IB_LIVE_PASS}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: always
+
+  worker:
+    build: .
+    container_name: trading_worker
+    command: celery -A src.worker.celery_app.celery_app worker --loglevel=INFO
+    environment:
+      DATABASE_URL: postgresql+psycopg://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}
+      REDIS_URL: redis://${REDIS_HOST:-redis}:${REDIS_PORT:-6379}/0
+      CELERY_BROKER_URL: redis://${REDIS_HOST:-redis}:${REDIS_PORT:-6379}/0
+      CELERY_RESULT_BACKEND: redis://${REDIS_HOST:-redis}:${REDIS_PORT:-6379}/1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: always
+
+volumes:
+  pgdata:
+
+--- END OF docker-compose.yml ---
+

@@ -1,0 +1,325 @@
+/* src/styles/layout.css */
+*, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+  }
+  
+  html, body, #root {
+    height: 100%;
+    width: 100%;
+    overflow: hidden;
+  }
+  
+  body {
+    font-family: var(--tv-font-family);
+    font-size: var(--tv-font-size-md);
+    color: var(--tv-color-text-primary);
+    background: var(--tv-color-platform-background);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  
+  .app-root {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  
+  /* Scrollbar styling */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  
+  ::-webkit-scrollbar-track {
+    background: var(--tv-color-scrollbar-track);
+  }
+  
+  ::-webkit-scrollbar-thumb {
+    background: var(--tv-color-scrollbar-thumb);
+    border-radius: 4px;
+  }
+  
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--tv-color-scrollbar-thumb-hover);
+  }
+  
+  /* Workspace layout */
+  .workspace {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+  }
+  
+  .workspace-left-toolbar {
+    width: 48px;
+    flex-shrink: 0;
+    border-right: 1px solid var(--tv-color-toolbar-divider);
+    display: flex;
+    flex-direction: column;
+    padding: var(--tv-spacing-sm);
+    gap: var(--tv-spacing-xs);
+  }
+  
+  .workspace-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: relative;
+  }
+  
+  /* Top toolbar */
+  .top-toolbar {
+    height: 38px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    padding: 0 var(--tv-spacing-sm);
+    gap: var(--tv-spacing-xs);
+    border-bottom: 1px solid var(--tv-color-toolbar-divider);
+    background: var(--tv-color-platform-background);
+    z-index: var(--tv-z-toolbar);
+  }
+  
+  .top-toolbar-group {
+    display: flex;
+    align-items: center;
+    gap: var(--tv-spacing-xxs);
+  }
+  
+  .top-toolbar-divider {
+    width: 1px;
+    height: 24px;
+    background: var(--tv-color-toolbar-divider);
+    margin: 0 var(--tv-spacing-sm);
+  }
+  
+  .top-toolbar-spacer {
+    flex: 1;
+  }
+  
+  /* Chart container */
+  .chart-container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: relative;
+  }
+  
+  /* Pane layout */
+  .pane-stack {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  
+  .chart-pane {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: relative;
+    min-height: 60px;
+  }
+  
+  .chart-pane-content {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+  }
+  
+  .chart-pane-chart {
+    position: absolute;
+    inset: 0;
+  }
+  
+/* Pane resizer */
+.pane-resizer {
+    height: 8px;
+    cursor: ns-resize;
+    position: relative;
+    flex-shrink: 0;
+    z-index: 10;
+    background: transparent;
+  }
+  
+  .pane-resizer:hover > div,
+  .pane-resizer.active > div {
+    background: var(--tv-color-item-active-text) !important;
+  }
+  
+  
+  .pane-resizer::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: 1px;
+    background: var(--tv-color-border);
+    transform: translateY(-50%);
+  }
+  
+  .pane-resizer:hover::before,
+  .pane-resizer.active::before {
+    background: var(--tv-color-item-active-text);
+  }
+  
+  .pane-resizer::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 40px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--tv-color-border);
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+  
+  .pane-resizer:hover::after {
+    opacity: 1;
+  }
+  
+  /* Legend overlay */
+  .pane-legend {
+    position: absolute;
+    top: var(--tv-spacing-sm);
+    left: var(--tv-spacing-md);
+    z-index: var(--tv-z-legend);
+    display: flex;
+    flex-direction: column;
+    gap: var(--tv-spacing-xxs);
+    pointer-events: none;
+  }
+  
+  .legend-row {
+    display: flex;
+    align-items: center;
+    gap: var(--tv-spacing-xs);
+    font-size: var(--tv-font-size-sm);
+    pointer-events: auto;
+    padding: var(--tv-spacing-xxs) var(--tv-spacing-xs);
+    border-radius: var(--tv-radius-sm);
+    transition: background 0.1s;
+  }
+  
+  .legend-row:hover {
+    background: var(--tv-color-toolbar-button-background-hover);
+  }
+  
+  .legend-title {
+    font-weight: 500;
+    color: var(--tv-color-text-primary);
+  }
+  
+  .legend-values {
+    display: flex;
+    gap: var(--tv-spacing-sm);
+    color: var(--tv-color-text-secondary);
+  }
+  
+  .legend-value {
+    font-family: 'Roboto Mono', monospace;
+  }
+  
+  .legend-value.up {
+    color: var(--tv-color-success);
+  }
+  
+  .legend-value.down {
+    color: var(--tv-color-error);
+  }
+  
+  .legend-actions {
+    display: flex;
+    gap: var(--tv-spacing-xxs);
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+  
+  .legend-row:hover .legend-actions {
+    opacity: 1;
+  }
+  
+  .legend-action-btn {
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: transparent;
+    color: var(--tv-color-text-secondary);
+    cursor: pointer;
+    border-radius: var(--tv-radius-sm);
+    padding: 0;
+  }
+  
+  .legend-action-btn:hover {
+    background: var(--tv-color-toolbar-button-background-hover);
+    color: var(--tv-color-text-primary);
+  }
+  
+  .legend-action-btn svg {
+    width: 14px;
+    height: 14px;
+  }
+  
+  /* Indicator pane header */
+  .pane-header {
+    height: 24px;
+    display: flex;
+    align-items: center;
+    gap: var(--tv-spacing-xs);
+    padding: 0 var(--tv-spacing-sm);
+    background: var(--tv-color-pane-background);
+    border-bottom: 1px solid var(--tv-color-border);
+    font-size: var(--tv-font-size-sm);
+    flex-shrink: 0;
+  }
+  
+  .pane-header-title {
+    flex: 1;
+    color: var(--tv-color-text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  
+  .pane-header-btn {
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: transparent;
+    color: var(--tv-color-text-secondary);
+    cursor: pointer;
+    border-radius: var(--tv-radius-sm);
+    padding: 0;
+    opacity: 0;
+    transition: opacity 0.1s;
+  }
+  
+  .pane-header:hover .pane-header-btn {
+    opacity: 1;
+  }
+  
+  .pane-header-btn:hover {
+    background: var(--tv-color-toolbar-button-background-hover);
+    color: var(--tv-color-text-primary);
+  }
+  
+  .pane-header-btn svg {
+    width: 14px;
+    height: 14px;
+  }
+  

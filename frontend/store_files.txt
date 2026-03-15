@@ -1,0 +1,546 @@
+--- START OF src/store/chartStore.js ---
+
+// src/store/chartStore.js (complete)
+import { create } from 'zustand';
+import { subscribeWithSelector } from 'zustand/middleware';
+import { STORAGE_KEY } from '../lib/constants';
+
+const generateId = () => 
+  crypto?.randomUUID?.() || `id-${Math.random().toString(36).slice(2)}${Date.now()}`;
+
+// Indicator definitions
+export const INDICATOR_DEFS = [
+  { 
+    type: 'volume', 
+    name: 'Volume', 
+    overlay: true, 
+    defaultParams: {},
+    description: 'Trading volume histogram',
+    category: 'volume'
+  },
+  { 
+    type: 'sma', 
+    name: 'SMA', 
+    fullName: 'Simple Moving Average',
+    overlay: true, 
+    defaultParams: { period: 20, color: '#2962FF' },
+    description: 'Simple Moving Average',
+    category: 'moving-averages'
+  },
+  { 
+    type: 'ema', 
+    name: 'EMA', 
+    fullName: 'Exponential Moving Average',
+    overlay: true, 
+    defaultParams: { period: 20, color: '#FF6D00' },
+    description: 'Exponential Moving Average',
+    category: 'moving-averages'
+  },
+  { 
+    type: 'bb', 
+    name: 'BB', 
+    fullName: 'Bollinger Bands',
+    overlay: true, 
+    defaultParams: { period: 20, stdDev: 2, color: '#7B1FA2' },
+    description: 'Bollinger Bands with standard deviation',
+    category: 'moving-averages'
+  },
+  { 
+    type: 'vwap', 
+    name: 'VWAP', 
+    fullName: 'Volume Weighted Average Price',
+    overlay: true, 
+    defaultParams: { color: '#00BCD4' },
+    description: 'Volume Weighted Average Price',
+    category: 'moving-averages'
+  },
+  { 
+    type: 'rsi', 
+    name: 'RSI', 
+    fullName: 'Relative Strength Index',
+    overlay: false, 
+    defaultParams: { period: 14, overbought: 70, oversold: 30 },
+    description: 'Relative Strength Index oscillator',
+    category: 'oscillators'
+  },
+  { 
+    type: 'macd', 
+    name: 'MACD', 
+    fullName: 'Moving Average Convergence Divergence',
+    overlay: false, 
+    defaultParams: { fast: 12, slow: 26, signal: 9 },
+    description: 'MACD with histogram and signal line',
+    category: 'oscillators'
+  },
+  { 
+    type: 'stoch', 
+    name: 'Stochastic', 
+    fullName: 'Stochastic Oscillator',
+    overlay: false, 
+    defaultParams: { kPeriod: 14, dPeriod: 3, smooth: 3 },
+    description: 'Stochastic %K and %D lines',
+    category: 'oscillators'
+  },
+  { 
+    type: 'atr', 
+    name: 'ATR', 
+    fullName: 'Average True Range',
+    overlay: false, 
+    defaultParams: { period: 14 },
+    description: 'Average True Range volatility indicator',
+    category: 'volatility'
+  },
+  { 
+    type: 'adx', 
+    name: 'ADX', 
+    fullName: 'Average Directional Index',
+    overlay: false, 
+    defaultParams: { period: 14 },
+    description: 'Trend strength indicator',
+    category: 'trend'
+  },
+  { 
+    type: 'cci', 
+    name: 'CCI', 
+    fullName: 'Commodity Channel Index',
+    overlay: false, 
+    defaultParams: { period: 20 },
+    description: 'Momentum oscillator',
+    category: 'oscillators'
+  },
+  { 
+    type: 'obv', 
+    name: 'OBV', 
+    fullName: 'On Balance Volume',
+    overlay: false, 
+    defaultParams: {},
+    description: 'Cumulative volume indicator',
+    category: 'volume'
+  }
+];
+
+export const useChartStore = create(
+  subscribeWithSelector((set, get) => ({
+    // Chart state
+    symbol: 'AAPL',
+    barSize: '15 mins',
+    duration: '1 W',
+    useRTH: true,
+    theme: 'dark',
+    
+    // Data
+    bars: [],
+    loading: false,
+    error: null,
+    
+    // Indicators
+    indicators: [
+      { id: 'volume-main', type: 'volume', overlay: true, visible: true, params: {} }
+    ],
+    favorites: ['sma', 'ema', 'rsi', 'macd'],
+    
+    // Pane layout (heights as fractions)
+    paneHeights: {},
+    
+    // UI state
+    indicatorDialogOpen: false,
+    settingsDialogOpen: false,
+    activeSettingsIndicator: null,
+
+    // Actions
+    setSymbol: (symbol) => set({ symbol: symbol.toUpperCase().trim() }),
+    setBarSize: (barSize) => set({ barSize }),
+    setDuration: (duration) => set({ duration }),
+    setUseRTH: (useRTH) => set({ useRTH }),
+    toggleTheme: () => set((state) => ({ 
+      theme: state.theme === 'dark' ? 'light' : 'dark' 
+    })),
+    
+    setBars: (barsOrUpdater) => {
+      if (typeof barsOrUpdater === 'function') {
+        const currentBars = get().bars;
+        const newBars = barsOrUpdater(currentBars);
+        set({ bars: newBars, loading: false, error: null });
+      } else {
+        set({ bars: barsOrUpdater, loading: false, error: null });
+      }
+    },   
+    // Add these new actions for efficient real-time updates
+    updateLastBar: (updatedBar) => {
+      const bars = get().bars;
+      if (!bars || bars.length === 0) return;
+      
+      const newBars = [...bars.slice(0, -1), updatedBar];
+      set({ bars: newBars });
+    },
+
+    addNewBar: (newBar) => {
+      const bars = get().bars || [];
+      set({ bars: [...bars, newBar] });
+    },
+ 
+    setLoading: (loading) => set({ loading }),
+    setError: (error) => set({ error, loading: false }),
+    
+    addIndicator: (type, params = {}) => {
+      const { indicators } = get();
+      const def = INDICATOR_DEFS.find(d => d.type === type);
+      if (!def) return null;
+      
+      // Volume is unique
+      if (type === 'volume') {
+        const existing = indicators.find(i => i.type === 'volume');
+        if (existing) {
+          set({
+            indicators: indicators.map(i => 
+              i.type === 'volume' ? { ...i, visible: true } : i
+            )
+          });
+          return existing.id;
+        }
+      }
+      
+      const newIndicator = {
+        id: generateId(),
+        type: def.type,
+        overlay: def.overlay,
+        visible: true,
+        params: { ...def.defaultParams, ...params }
+      };
+      
+      set((state) => {
+        const newIndicators = [...state.indicators, newIndicator];
+        const newPaneHeights = { ...state.paneHeights };
+        
+        if (!newIndicator.overlay) {
+          // Calculate default height for new pane
+          const existingPanes = state.indicators.filter(i => !i.overlay).length;
+          const defaultHeight = 0.2;
+          newPaneHeights[newIndicator.id] = defaultHeight;
+          
+          // Adjust main pane height
+          const currentMainHeight = newPaneHeights.main ?? 0.7;
+          newPaneHeights.main = Math.max(0.3, currentMainHeight - defaultHeight);
+        }
+        
+        return { 
+          indicators: newIndicators,
+          paneHeights: newPaneHeights
+        };
+      });
+      
+      return newIndicator.id;
+    },
+    
+    removeIndicator: (id) => {
+      set((state) => {
+        const ind = state.indicators.find(i => i.id === id);
+        const newIndicators = state.indicators.filter(i => i.id !== id);
+        const newPaneHeights = { ...state.paneHeights };
+        
+        // If removing a non-overlay, redistribute its height to main
+        if (ind && !ind.overlay) {
+          const removedHeight = newPaneHeights[id] ?? 0.2;
+          delete newPaneHeights[id];
+          newPaneHeights.main = (newPaneHeights.main ?? 0.7) + removedHeight;
+        }
+        
+        return {
+          indicators: newIndicators,
+          paneHeights: newPaneHeights,
+          settingsDialogOpen: state.activeSettingsIndicator === id 
+            ? false 
+            : state.settingsDialogOpen,
+          activeSettingsIndicator: state.activeSettingsIndicator === id 
+            ? null 
+            : state.activeSettingsIndicator
+        };
+      });
+    },
+    
+    toggleIndicatorVisibility: (id) => {
+      set((state) => ({
+        indicators: state.indicators.map(i => 
+          i.id === id ? { ...i, visible: !i.visible } : i
+        )
+      }));
+    },
+    
+    updateIndicatorParams: (id, params) => {
+      set((state) => ({
+        indicators: state.indicators.map(i =>
+          i.id === id ? { ...i, params: { ...i.params, ...params } } : i
+        )
+      }));
+    },
+    
+    toggleFavorite: (type) => {
+      set((state) => ({
+        favorites: state.favorites.includes(type)
+          ? state.favorites.filter(f => f !== type)
+          : [...state.favorites, type]
+      }));
+    },
+    
+    setPaneHeights: (heightsOrFn) => {
+        if (typeof heightsOrFn === 'function') {
+          set((state) => ({ paneHeights: heightsOrFn(state.paneHeights) }));
+        } else {
+          set({ paneHeights: heightsOrFn });
+        }
+      },
+      
+    
+    openIndicatorDialog: () => set({ indicatorDialogOpen: true }),
+    closeIndicatorDialog: () => set({ indicatorDialogOpen: false }),
+    
+    openSettings: (id) => set({ 
+      settingsDialogOpen: true, 
+      activeSettingsIndicator: id 
+    }),
+    closeSettings: () => set({ 
+      settingsDialogOpen: false, 
+      activeSettingsIndicator: null 
+    }),
+    
+    // Persistence
+    loadPersistedState: () => {
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (!raw) return;
+        
+        const saved = JSON.parse(raw);
+        set({
+          symbol: saved.symbol || 'AAPL',
+          barSize: saved.barSize || '15 mins',
+          duration: saved.duration || '1 W',
+          useRTH: saved.useRTH ?? true,
+          theme: saved.theme || 'dark',
+          indicators: saved.indicators?.length ? saved.indicators : [
+            { id: 'volume-main', type: 'volume', overlay: true, visible: true, params: {} }
+          ],
+          favorites: saved.favorites || ['sma', 'ema', 'rsi', 'macd'],
+          paneHeights: saved.paneHeights || {}
+        });
+      } catch (e) {
+        console.error('Failed to load state:', e);
+      }
+    },
+    
+    reloadChart: () => {
+      const { symbol } = get();
+      if (symbol) {
+        // Clear bars to show loading state
+        set({ bars: [], loading: true, error: null });
+        
+        // Trigger reload by updating a timestamp
+        set({ lastReload: Date.now() });
+      }
+    },
+
+    persistState: () => {
+      const state = get();
+      const toSave = {
+        symbol: state.symbol,
+        barSize: state.barSize,
+        duration: state.duration,
+        useRTH: state.useRTH,
+        theme: state.theme,
+        indicators: state.indicators,
+        favorites: state.favorites,
+        paneHeights: state.paneHeights
+      };
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(toSave));
+      } catch (e) {
+        console.error('Failed to persist state:', e);
+      }
+    }
+  }))
+);
+
+// Auto-persist on changes (debounced)
+let persistTimeout = null;
+useChartStore.subscribe(
+  (state) => [
+    state.symbol, state.barSize, state.duration, state.useRTH,
+    state.theme, state.indicators, state.favorites, state.paneHeights
+  ],
+  () => {
+    if (persistTimeout) clearTimeout(persistTimeout);
+    persistTimeout = setTimeout(() => {
+      useChartStore.getState().persistState();
+    }, 500);
+  },
+  { equalityFn: (a, b) => JSON.stringify(a) === JSON.stringify(b) }
+);
+
+
+--- END OF src/store/chartStore.js ---
+
+--- START OF src/store/portfolioStore.js ---
+
+// src/store/portfolioStore.js
+import { create } from 'zustand';
+
+const API_BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
+
+export const usePortfolioStore = create((set, get) => ({
+  // State
+  portfolioMode: 'paper', // 'paper' or 'live'
+  accounts: [],
+  selectedAccount: null,
+  accountSummary: null,
+  positions: [],
+  orders: [],
+  trades: [],
+  
+  // Loading states
+  loading: { accounts: false, summary: false, positions: false, orders: false, trades: false },
+  
+  // Errors
+  errors: { accounts: null, summary: null, positions: null, orders: null, trades: null },
+  
+  // UI State
+  activePanel: 'positions',
+  sidebarOpen: false,
+  
+  // Actions
+  setSidebarOpen: (open) => set({ sidebarOpen: open }),
+  setActivePanel: (panel) => set({ activePanel: panel }),
+  
+  setPortfolioMode: (mode) => {
+    set({ 
+      portfolioMode: mode,
+      accounts: [],
+      selectedAccount: null,
+      accountSummary: null,
+      positions: [],
+      orders: [],
+      trades: [],
+      errors: { accounts: null, summary: null, positions: null, orders: null, trades: null }
+    });
+    get().fetchAccounts();
+  },
+  
+  setSelectedAccount: (accountId) => {
+    set({ selectedAccount: accountId });
+    const state = get();
+    if (accountId) {
+      state.fetchAccountSummary(accountId);
+      state.fetchPositions(accountId);
+      state.fetchOrders(accountId);
+      state.fetchTrades(accountId);
+    }
+  },
+  
+  // API Calls
+  fetchAccounts: async () => {
+    const mode = get().portfolioMode;
+    set((s) => ({ loading: { ...s.loading, accounts: true }, errors: { ...s.errors, accounts: null } }));
+    try {
+      const res = await fetch(`${API_BASE}/portfolio/accounts?mode=${mode}`);
+      const data = await res.json();
+      if (data.status === 'OK') {
+        set({ accounts: data.accounts });
+        const { selectedAccount } = get();
+        if (!selectedAccount && data.accounts.length > 0) {
+          get().setSelectedAccount(data.accounts[0]);
+        }
+      } else {
+        throw new Error(data.detail || data.error || 'Failed to fetch accounts');
+      }
+    } catch (e) {
+      set((s) => ({ errors: { ...s.errors, accounts: e.message } }));
+    } finally {
+      set((s) => ({ loading: { ...s.loading, accounts: false } }));
+    }
+  },
+  
+  fetchAccountSummary: async (accountId) => {
+    if (!accountId) return;
+    const mode = get().portfolioMode;
+    set((s) => ({ loading: { ...s.loading, summary: true }, errors: { ...s.errors, summary: null } }));
+    try {
+      const res = await fetch(`${API_BASE}/portfolio/accounts/${accountId}/summary?mode=${mode}`);
+      const data = await res.json();
+      if (data.status === 'OK') set({ accountSummary: data.payload });
+      else throw new Error(data.detail || data.error || 'Failed to fetch summary');
+    } catch (e) {
+      set((s) => ({ errors: { ...s.errors, summary: e.message } }));
+    } finally {
+      set((s) => ({ loading: { ...s.loading, summary: false } }));
+    }
+  },
+  
+  fetchPositions: async (accountId) => {
+    if (!accountId) {
+      console.error("🚨 DEBUG STORE: fetchPositions aborted - No accountId provided!");
+      return;
+    }
+    const mode = get().portfolioMode;
+    console.log(`🚨 DEBUG STORE: Requesting /positions | Account: ${accountId} | Mode: ${mode}`);
+    set((s) => ({ loading: { ...s.loading, positions: true }, errors: { ...s.errors, positions: null } }));
+    try {
+      const res = await fetch(`${API_BASE}/portfolio/accounts/${accountId}/positions?mode=${mode}`);
+      const data = await res.json();
+      console.log(`🚨 DEBUG STORE: Raw API response for positions:`, data);
+      
+      if (data.status === 'OK') set({ positions: data.payload });
+      else throw new Error(data.detail || data.error || 'Failed to fetch positions');
+    } catch (e) {
+      console.error(`🚨 DEBUG STORE ERROR:`, e);
+      set((s) => ({ errors: { ...s.errors, positions: e.message } }));
+    } finally {
+      set((s) => ({ loading: { ...s.loading, positions: false } }));
+    }
+  },
+  
+  fetchOrders: async (accountId, status = null) => {
+    if (!accountId) return;
+    const mode = get().portfolioMode;
+    set((s) => ({ loading: { ...s.loading, orders: true }, errors: { ...s.errors, orders: null } }));
+    try {
+      const url = new URL(`${API_BASE}/portfolio/accounts/${accountId}/orders`);
+      url.searchParams.set('mode', mode);
+      if (status) url.searchParams.set('status', status);
+      const res = await fetch(url.toString());
+      const data = await res.json();
+      if (data.status === 'OK') set({ orders: data.payload });
+      else throw new Error(data.detail || data.error || 'Failed to fetch orders');
+    } catch (e) {
+      set((s) => ({ errors: { ...s.errors, orders: e.message } }));
+    } finally {
+      set((s) => ({ loading: { ...s.loading, orders: false } }));
+    }
+  },
+  
+  fetchTrades: async (accountId, days = 1) => {
+    if (!accountId) return;
+    const mode = get().portfolioMode;
+    set((s) => ({ loading: { ...s.loading, trades: true }, errors: { ...s.errors, trades: null } }));
+    try {
+      const res = await fetch(`${API_BASE}/portfolio/accounts/${accountId}/trades?days=${days}&mode=${mode}`);
+      const data = await res.json();
+      if (data.status === 'OK') set({ trades: data.payload });
+      else throw new Error(data.detail || data.error || 'Failed to fetch trades');
+    } catch (e) {
+      set((s) => ({ errors: { ...s.errors, trades: e.message } }));
+    } finally {
+      set((s) => ({ loading: { ...s.loading, trades: false } }));
+    }
+  },
+  
+  refreshAll: () => {
+    const { selectedAccount } = get();
+    if (selectedAccount) {
+      get().fetchAccountSummary(selectedAccount);
+      get().fetchPositions(selectedAccount);
+      get().fetchOrders(selectedAccount);
+      get().fetchTrades(selectedAccount);
+    }
+  }
+}));
+
+--- END OF src/store/portfolioStore.js ---
+

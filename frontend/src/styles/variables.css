@@ -1,0 +1,125 @@
+/* src/styles/variables.css */
+:root {
+    /* Light theme */
+    --tv-color-platform-background: #ffffff;
+    --tv-color-pane-background: #ffffff;
+    --tv-color-toolbar-button-background-hover: rgba(0, 0, 0, 0.06);
+    --tv-color-toolbar-button-background-active: rgba(0, 0, 0, 0.1);
+    --tv-color-toolbar-button-text: #131722;
+    --tv-color-toolbar-button-text-hover: #131722;
+    --tv-color-toolbar-button-text-active: #2962ff;
+    
+    --tv-color-popup-background: #ffffff;
+    --tv-color-popup-element-text: #131722;
+    --tv-color-popup-element-text-hover: #131722;
+    --tv-color-popup-element-background-hover: rgba(0, 0, 0, 0.06);
+    --tv-color-popup-element-secondary-text: #787b86;
+    --tv-color-popup-element-divider: #e0e3eb;
+    
+    --tv-color-item-active-text: #2962ff;
+    --tv-color-item-active-background: rgba(41, 98, 255, 0.1);
+    
+    --tv-color-toolbar-divider: #e0e3eb;
+    --tv-color-border: #e0e3eb;
+    --tv-color-border-hover: #b2b5be;
+    
+    --tv-color-text-primary: #131722;
+    --tv-color-text-secondary: #787b86;
+    --tv-color-text-tertiary: #b2b5be;
+    
+    --tv-color-input-background: #f0f3fa;
+    --tv-color-input-border: #e0e3eb;
+    --tv-color-input-border-focus: #2962ff;
+    
+    --tv-color-success: #089981;
+    --tv-color-error: #f23645;
+    --tv-color-warning: #ff9800;
+    
+    --tv-color-scrollbar-track: transparent;
+    --tv-color-scrollbar-thumb: rgba(0, 0, 0, 0.2);
+    --tv-color-scrollbar-thumb-hover: rgba(0, 0, 0, 0.3);
+    
+    /* Chart colors */
+    --tv-color-chart-up: #089981;
+    --tv-color-chart-down: #f23645;
+    --tv-color-chart-grid: rgba(0, 0, 0, 0.06);
+    --tv-color-chart-crosshair: #9598a1;
+    
+    /* Shadows */
+    --tv-shadow-popup: 0 2px 4px rgba(0, 0, 0, 0.1), 0 8px 16px rgba(0, 0, 0, 0.1);
+    --tv-shadow-dropdown: 0 2px 8px rgba(0, 0, 0, 0.12);
+    
+    /* Spacing */
+    --tv-spacing-xxs: 2px;
+    --tv-spacing-xs: 4px;
+    --tv-spacing-sm: 8px;
+    --tv-spacing-md: 12px;
+    --tv-spacing-lg: 16px;
+    --tv-spacing-xl: 24px;
+    --tv-spacing-xxl: 32px;
+    
+    /* Border radius */
+    --tv-radius-sm: 4px;
+    --tv-radius-md: 6px;
+    --tv-radius-lg: 8px;
+    --tv-radius-xl: 12px;
+    
+    /* Typography */
+    --tv-font-family: -apple-system, BlinkMacSystemFont, 'Trebuchet MS', Roboto, Ubuntu, sans-serif;
+    --tv-font-size-xs: 11px;
+    --tv-font-size-sm: 12px;
+    --tv-font-size-md: 13px;
+    --tv-font-size-lg: 14px;
+    --tv-font-size-xl: 16px;
+    --tv-font-size-xxl: 20px;
+    
+    /* Z-index layers */
+    --tv-z-pane: 1;
+    --tv-z-legend: 10;
+    --tv-z-toolbar: 20;
+    --tv-z-dropdown: 100;
+    --tv-z-modal: 200;
+    --tv-z-toast: 300;
+  }
+  
+  [data-theme="dark"] {
+    --tv-color-platform-background: #131722;
+    --tv-color-pane-background: #131722;
+    --tv-color-toolbar-button-background-hover: rgba(255, 255, 255, 0.06);
+    --tv-color-toolbar-button-background-active: rgba(255, 255, 255, 0.1);
+    --tv-color-toolbar-button-text: #d1d4dc;
+    --tv-color-toolbar-button-text-hover: #ffffff;
+    --tv-color-toolbar-button-text-active: #2962ff;
+    
+    --tv-color-popup-background: #1e222d;
+    --tv-color-popup-element-text: #d1d4dc;
+    --tv-color-popup-element-text-hover: #ffffff;
+    --tv-color-popup-element-background-hover: rgba(255, 255, 255, 0.06);
+    --tv-color-popup-element-secondary-text: #787b86;
+    --tv-color-popup-element-divider: #2a2e39;
+    
+    --tv-color-item-active-text: #2962ff;
+    --tv-color-item-active-background: rgba(41, 98, 255, 0.2);
+    
+    --tv-color-toolbar-divider: #2a2e39;
+    --tv-color-border: #2a2e39;
+    --tv-color-border-hover: #434651;
+    
+    --tv-color-text-primary: #d1d4dc;
+    --tv-color-text-secondary: #787b86;
+    --tv-color-text-tertiary: #434651;
+    
+    --tv-color-input-background: #2a2e39;
+    --tv-color-input-border: #363a45;
+    --tv-color-input-border-focus: #2962ff;
+    
+    --tv-color-chart-grid: rgba(255, 255, 255, 0.06);
+    --tv-color-chart-crosshair: #758696;
+    
+    --tv-color-scrollbar-thumb: rgba(255, 255, 255, 0.15);
+    --tv-color-scrollbar-thumb-hover: rgba(255, 255, 255, 0.25);
+    
+    --tv-shadow-popup: 0 4px 8px rgba(0, 0, 0, 0.3), 0 16px 32px rgba(0, 0, 0, 0.3);
+    --tv-shadow-dropdown: 0 4px 12px rgba(0, 0, 0, 0.4);
+  }
+  

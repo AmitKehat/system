@@ -1,0 +1,138 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: trading_postgres
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7
+    container_name: trading_redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # --- IMMORTAL PAPER ENGINE ---
+  ibgateway_paper:
+    image: ghcr.io/gnzsnz/ib-gateway:stable
+    container_name: trading_ibgateway_paper
+    environment:
+      TWS_USERID: ${IB_PAPER_USER}
+      TWS_PASSWORD: ${IB_PAPER_PASS}
+      TRADING_MODE: paper
+      VNC_SERVER_PASSWORD: ${IB_PAPER_VNC_PASSWORD}
+      TWOFA_TIMEOUT_ACTION: restart
+      RELOGIN_AFTER_TWOFA_TIMEOUT: "yes"
+      READ_ONLY_API: "no"
+    ports:
+      - "4004:4004" # Socat proxy port for Paper
+      - "5902:5900" # VNC port for Paper
+    restart: always
+
+  ib_runner_paper:
+    build: .
+    container_name: trading_ib_runner_paper
+    command: python -m src.ib.runner_daemon
+    environment:
+      IB_HOST: ibgateway_paper
+      IB_PORT: 4004 # Connect to Socat proxy
+      IB_CMD_STREAM: ib:cmd:paper
+      IB_REPLY_PREFIX: "ib:reply:paper:"
+      IB_STATUS_KEY: "ib:status:paper"
+      IB_BARS_PREFIX: "ib:bars:paper:"
+      REDIS_URL: redis://${REDIS_HOST:-redis}:${REDIS_PORT:-6379}/0
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: always
+
+  # --- IMMORTAL LIVE ENGINE ---
+  ibgateway_live:
+    image: ghcr.io/gnzsnz/ib-gateway:stable
+    container_name: trading_ibgateway_live
+    environment:
+      TWS_USERID: ${IB_LIVE_USER}
+      TWS_PASSWORD: ${IB_LIVE_PASS}
+      TRADING_MODE: live
+      VNC_SERVER_PASSWORD: ${IB_LIVE_VNC_PASSWORD}
+      TWOFA_TIMEOUT_ACTION: restart
+      RELOGIN_AFTER_TWOFA_TIMEOUT: "yes"
+      READ_ONLY_API: "no"
+    ports:
+      - "4003:4003" # Socat proxy port for Live
+      - "5901:5900" # VNC port for Live
+    restart: always
+
+  ib_runner_live:
+    build: .
+    container_name: trading_ib_runner_live
+    command: python -m src.ib.runner_daemon
+    environment:
+      IB_HOST: ibgateway_live
+      IB_PORT: 4003 # Connect to Socat proxy
+      IB_CMD_STREAM: ib:cmd:live
+      IB_REPLY_PREFIX: "ib:reply:live:"
+      IB_STATUS_KEY: "ib:status:live"
+      IB_BARS_PREFIX: "ib:bars:live:"
+      REDIS_URL: redis://${REDIS_HOST:-redis}:${REDIS_PORT:-6379}/0
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: always
+
+  # --- WEB API ---
+  api:
+    build: .
+    container_name: trading_api
+    command: uvicorn src.api.main:app --host 0.0.0.0 --port 8000
+    environment:
+      DATABASE_URL: postgresql+psycopg://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}
+      REDIS_URL: redis://${REDIS_HOST:-redis}:${REDIS_PORT:-6379}/0
+      CELERY_BROKER_URL: redis://${REDIS_HOST:-redis}:${REDIS_PORT:-6379}/0
+      CELERY_RESULT_BACKEND: redis://${REDIS_HOST:-redis}:${REDIS_PORT:-6379}/1
+      IB_PAPER_USER: ${IB_PAPER_USER}
+      IB_PAPER_PASS: ${IB_PAPER_PASS}
+      IB_LIVE_USER: ${IB_LIVE_USER}
+      IB_LIVE_PASS: ${IB_LIVE_PASS}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: always
+
+  worker:
+    build: .
+    container_name: trading_worker
+    command: celery -A src.worker.celery_app.celery_app worker --loglevel=INFO
+    environment:
+      DATABASE_URL: postgresql+psycopg://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}
+      REDIS_URL: redis://${REDIS_HOST:-redis}:${REDIS_PORT:-6379}/0
+      CELERY_BROKER_URL: redis://${REDIS_HOST:-redis}:${REDIS_PORT:-6379}/0
+      CELERY_RESULT_BACKEND: redis://${REDIS_HOST:-redis}:${REDIS_PORT:-6379}/1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: always
+
+volumes:
+  pgdata:

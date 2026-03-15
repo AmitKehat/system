@@ -1,0 +1,17 @@
+fastapi
+uvicorn[standard]
+pydantic
+sqlalchemy
+alembic
+psycopg2-binary
+celery
+redis[hiredis]>=5.0.0
+python-dotenv
+ib_insync
+pandas
+numpy
+psycopg[binary]>=3.1
+matplotlib
+yfinance
+lxml
+backtesting

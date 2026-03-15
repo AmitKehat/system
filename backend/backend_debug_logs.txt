@@ -1,0 +1,20 @@
+trading_api  | INFO:     Started server process [1]
+trading_api  | INFO:     Waiting for application startup.
+trading_api  | INFO:     Application startup complete.
+trading_api  | INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+trading_api  | INFO:     147.236.127.242:31945 - "WebSocket /ws/status?session_id=4038ae53-84e4-45ff-8c9e-f39380348eeb" [accepted]
+trading_api  | INFO:     connection open
+trading_api  | INFO:     147.236.127.242:31947 - "POST /ib/hist_bars HTTP/1.1" 200 OK
+trading_api  | INFO:     147.236.127.242:31948 - "POST /ib/hist_bars HTTP/1.1" 200 OK
+trading_api  | INFO:     147.236.127.242:31947 - "POST /ib/hist_bars HTTP/1.1" 200 OK
+trading_api  | INFO:     connection closed
+trading_api  | INFO:     147.236.127.242:31952 - "POST /ib/login HTTP/1.1" 200 OK
+trading_api  | INFO:     147.236.127.242:31953 - "WebSocket /ws/status?session_id=63e38064-d8a2-420f-8681-b0067df21f68" [accepted]
+trading_api  | INFO:     connection open
+trading_api  | INFO:     147.236.127.242:31952 - "POST /ib/hist_bars HTTP/1.1" 200 OK
+trading_api  | INFO:     147.236.127.242:31952 - "GET /portfolio/accounts?mode=paper HTTP/1.1" 200 OK
+trading_api  | INFO:     147.236.127.242:31952 - "GET /portfolio/accounts/DU1725635/summary?mode=paper HTTP/1.1" 200 OK
+trading_api  | INFO:     147.236.127.242:31955 - "GET /portfolio/accounts/DU1725635/orders?mode=paper HTTP/1.1" 200 OK
+trading_api  | INFO:     147.236.127.242:31956 - "GET /portfolio/accounts/DU1725635/trades?days=1&mode=paper HTTP/1.1" 200 OK
+trading_api  | INFO:     147.236.127.242:31954 - "GET /portfolio/accounts/DU1725635/positions?mode=paper HTTP/1.1" 200 OK
+trading_api  | INFO:     147.236.127.242:31959 - "POST /api/simulator/run HTTP/1.1" 500 Internal Server Error

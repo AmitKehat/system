@@ -1,0 +1,93 @@
+================ PROJECT STRUCTURE ================
+src/
+    engine/
+        contribution.py
+        execution.py
+        broker_sim.py
+        strategy.py
+        positions.py
+        validate.py
+        runner.py
+        portfolio.py
+        export.py
+        run_utils.py
+        reporting.py
+        types.py
+        trades.py
+        backtest.py
+        costs.py
+        __init__.py
+        __pycache__/
+    worker/
+        celery_app.py
+        tasks.py
+        __init__.py
+        __pycache__/
+    data/
+        load_ib.py
+        ib_window.py
+        synth.py
+        load_csv.py
+        __pycache__/
+    common/
+        schemas.py
+        __pycache__/
+    api/
+        ib.py
+        portfolio.py
+        main.py
+        websocket.py
+        watchlist.py
+        __pycache__/
+    storage/
+        models.py
+        repo.py
+        db.py
+        write_repo.py
+        ib_cache.py
+        models_ib.py
+        __init__.py
+        __pycache__/
+    ib/
+        history.py
+        runner_daemon.py
+        contracts.py
+        connection.py
+        __pycache__/
+
+================ FILE CONTENTS ================
+
+--- FILE: src/components/Chart/MainChart.jsx (NOT FOUND) ---
+
+--- FILE: src/App.jsx (NOT FOUND) ---
+
+--- FILE: src/store/chartStore.js (NOT FOUND) ---
+
+--- FILE: src/main.py (NOT FOUND) ---
+
+--- FILE: src/store/statusStore.js (NOT FOUND) ---
+
+--- FILE: src/store/watchlistStore.js (NOT FOUND) ---
+
+--- FILE: requirements.txt ---
+fastapi
+uvicorn[standard]
+pydantic
+sqlalchemy
+alembic
+psycopg2-binary
+celery
+redis[hiredis]>=5.0.0
+python-dotenv
+ib_insync
+pandas
+numpy
+psycopg[binary]>=3.1
+matplotlib
+yfinance
+lxml
+
+--- FILE: src/components/Portfolio/PortfolioSidebar.jsx (NOT FOUND) ---
+
+--- FILE: src/components/Portfolio/ResizableSidebar.jsx (NOT FOUND) ---
+
