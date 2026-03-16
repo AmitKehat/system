@@ -91,49 +91,56 @@ def extract_symbol_from_text(text: str) -> Optional[str]:
     """
     Extract a stock ticker symbol from user text.
     Returns the first valid ticker found, or None if no ticker detected.
+    Works with ANY ticker symbol, not just a predefined list.
     """
-    # Common stock tickers - prioritize explicit mentions
-    known_tickers = [
-        "AAPL", "MSFT", "GOOGL", "GOOG", "AMZN", "TSLA", "NVDA", "META", "NFLX",
-        "AMD", "INTC", "IBM", "ORCL", "CRM", "ADBE", "PYPL", "SQ", "SHOP",
-        "SPY", "QQQ", "DIA", "IWM", "VTI", "VOO",
-        "JPM", "BAC", "WFC", "GS", "MS", "C",
-        "XOM", "CVX", "COP", "BP", "SLB",
-        "JNJ", "PFE", "UNH", "MRK", "ABBV", "LLY",
-        "KO", "PEP", "MCD", "SBUX", "NKE", "DIS",
-        "HD", "LOW", "TGT", "WMT", "COST", "AMZN",
-        "BA", "CAT", "GE", "MMM", "HON",
-        "V", "MA", "AXP",
-    ]
-
     text_upper = text.upper()
 
+    # Common English words to exclude (not tickers)
+    excluded_words = {
+        "I", "A", "AN", "THE", "TO", "FOR", "ON", "IN", "AT", "BY", "OF", "OR", "AND",
+        "IT", "IS", "AS", "IF", "SO", "BE", "DO", "GO", "UP", "NO", "YES", "OK",
+        "RUN", "BUY", "SELL", "USE", "TRY", "SET", "GET", "PUT", "ALL", "ANY",
+        "DAY", "NOW", "NEW", "OLD", "END", "TOP", "LOW", "HIGH", "SAME", "THIS",
+        "THAT", "WITH", "FROM", "YEAR", "ONLY", "WANT", "CELL", "CROSS", "ABOVE",
+        "BELOW", "PRICE", "START", "STOP", "WHEN", "THEN", "ALSO", "JUST", "LIKE",
+        "MAKE", "TAKE", "GIVE", "KEEP", "HOLD", "SHOW", "WORK", "MOVE", "HELP",
+        "EMA", "SMA", "RSI", "MACD", "ATR", "ADX"  # Technical indicators
+    }
+
     # First, look for explicit patterns like "for NVDA", "on TSLA", "run AAPL"
+    # These patterns strongly indicate a ticker symbol
     explicit_patterns = [
         r'\bfor\s+([A-Z]{1,5})\b',
         r'\bon\s+([A-Z]{1,5})\b',
-        r'\brun\s+([A-Z]{1,5})\b',
+        r'\brun\s+(?:it\s+)?(?:on\s+)?([A-Z]{1,5})\b',
         r'\bbacktest\s+([A-Z]{1,5})\b',
         r'\btest\s+([A-Z]{1,5})\b',
-        r'\bwith\s+([A-Z]{1,5})\b',
         r'\busing\s+([A-Z]{1,5})\b',
         r'\bswitch\s+to\s+([A-Z]{1,5})\b',
         r'\bchange\s+to\s+([A-Z]{1,5})\b',
         r'\btry\s+([A-Z]{1,5})\b',
+        r'\bsame\s+(?:strategy\s+)?(?:for\s+)?([A-Z]{1,5})\b',
+        r'\bstrategy\s+(?:for\s+)?([A-Z]{1,5})\b',
     ]
 
     for pattern in explicit_patterns:
         match = re.search(pattern, text_upper)
         if match:
             potential_ticker = match.group(1)
-            if potential_ticker in known_tickers:
+            if potential_ticker not in excluded_words and len(potential_ticker) >= 1:
+                print(f"[SYMBOL EXTRACT] Found ticker via pattern '{pattern}': {potential_ticker}")
                 return potential_ticker
 
-    # Then check for any known ticker mentioned in the text
-    for ticker in known_tickers:
-        # Use word boundary to avoid matching substrings
-        if re.search(r'\b' + ticker + r'\b', text_upper):
-            return ticker
+    # Look for standalone uppercase words that look like tickers (2-5 chars, all caps in original)
+    # Check original text to ensure it was actually written in caps by the user
+    ticker_pattern = r'\b([A-Z]{2,5})\b'
+    for match in re.finditer(ticker_pattern, text):
+        potential_ticker = match.group(1)
+        # Verify it's actually uppercase in original text (not just our upper conversion)
+        original_word = text[match.start():match.end()]
+        if original_word.isupper() and potential_ticker not in excluded_words:
+            print(f"[SYMBOL EXTRACT] Found standalone uppercase ticker: {potential_ticker}")
+            return potential_ticker
 
     return None
 

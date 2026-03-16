@@ -57,18 +57,22 @@ export const useSimulatorStore = create(
           const data = await res.json();
 
           if (data.status === 'success') {
-              // Backtest completed - change chart to backtest symbol ONLY if different
-              if (data.param_update && data.param_update.symbol) {
+              console.log(`[SIMULATOR] Backtest SUCCESS - Full response:`, data);
+              console.log(`[SIMULATOR] Results symbol: ${data.results?.symbol}, Equity curve length: ${data.results?.equity_curve?.length}`);
+
+              // Backtest completed - ALWAYS sync chart to backtest symbol
+              const backtestSymbol = data.results?.symbol || data.param_update?.symbol;
+              if (backtestSymbol) {
                   const currentSymbol = useChartStore.getState().symbol;
-                  console.log(`[SIMULATOR] Backend symbol: ${data.param_update.symbol}, Current chart: ${currentSymbol}`);
-                  if (data.param_update.symbol.toUpperCase() !== currentSymbol.toUpperCase()) {
-                      console.log(`[SIMULATOR] Changing chart from ${currentSymbol} to ${data.param_update.symbol}`);
-                      useChartStore.getState().setSymbol(data.param_update.symbol);
+                  console.log(`[SIMULATOR] Backtest symbol: ${backtestSymbol}, Current chart: ${currentSymbol}`);
+                  if (backtestSymbol.toUpperCase() !== currentSymbol.toUpperCase()) {
+                      console.log(`[SIMULATOR] Changing chart from ${currentSymbol} to ${backtestSymbol}`);
+                      useChartStore.getState().setSymbol(backtestSymbol);
                   } else {
-                      console.log(`[SIMULATOR] Symbol unchanged, not reloading chart`);
+                      console.log(`[SIMULATOR] Chart already on correct symbol: ${currentSymbol}`);
                   }
               } else {
-                  console.log(`[SIMULATOR] No symbol in param_update:`, data.param_update);
+                  console.log(`[SIMULATOR] WARNING: No symbol in results or param_update!`, data);
               }
 
               // Update date parameters if they were changed
