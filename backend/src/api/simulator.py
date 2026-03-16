@@ -29,7 +29,7 @@ class SimulatorRequest(BaseModel):
 
 def safe_float(v):
     """Safely convert any NumPy/Pandas numeric to a standard Python float to prevent JSON Network Errors."""
-    if pd.isna(v) or pd.isnull(v): 
+    if pd.isna(v) or pd.isnull(v):
         return 0.0
     try:
         val = float(v)
@@ -48,7 +48,7 @@ def call_llm(provider: str, api_key: str, messages: List[Dict[str, str]]) -> str
             res = requests.post(url, headers=headers, json=payload, timeout=45)
             res.raise_for_status()
             return res.json()["choices"][0]["message"]["content"]
-            
+
         elif provider == "anthropic":
             url = "https://api.anthropic.com/v1/messages"
             headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01", "Content-Type": "application/json"}
@@ -58,7 +58,7 @@ def call_llm(provider: str, api_key: str, messages: List[Dict[str, str]]) -> str
             res = requests.post(url, headers=headers, json=payload, timeout=45)
             res.raise_for_status()
             return res.json()["content"][0]["text"]
-            
+
         elif provider == "gemini":
             url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key={api_key}"
             headers = {"Content-Type": "application/json"}
@@ -70,11 +70,22 @@ def call_llm(provider: str, api_key: str, messages: List[Dict[str, str]]) -> str
             res = requests.post(url, headers=headers, json=payload, timeout=45)
             res.raise_for_status()
             return res.json()["candidates"][0]["content"]["parts"][0]["text"]
-            
+
         raise ValueError("Unsupported LLM Provider")
     except Exception as e:
         print(f"LLM API Error: {str(e)}")
         raise e
+
+def is_approval(prompt: str) -> bool:
+    """Check if the user's prompt is an approval to run the backtest."""
+    prompt_lower = prompt.lower().strip()
+    approval_phrases = [
+        "yes", "yeah", "yep", "yup", "sure", "ok", "okay", "go ahead",
+        "run it", "do it", "proceed", "execute", "let's go", "approved",
+        "confirm", "confirmed", "please run", "run the backtest", "run backtest",
+        "sounds good", "looks good", "perfect", "great", "go for it"
+    ]
+    return any(phrase in prompt_lower for phrase in approval_phrases)
 
 @router.post("/run")
 async def run_simulation(req: SimulatorRequest):
@@ -86,117 +97,102 @@ async def run_simulation(req: SimulatorRequest):
 
     system_prompt = f"""
 You are an expert quantitative trading assistant.
-Your goal is to write a trading strategy in Python.
+Your goal is to help users design and backtest trading strategies.
 CRITICAL RULE: DO NOT mention the underlying Python libraries, frameworks, or code in your conversation.
 
-CURRENT BACKTEST PARAMETERS:
-- Target Symbol: {req.symbol}
+CURRENT BACKTEST PARAMETERS (from the system):
+- Current Chart Symbol: {req.symbol}
 - Date Range: {req.parameters.get('startDate')} to {req.parameters.get('endDate')}
 - Initial Capital: ${req.parameters.get('initialCapital')}
 - Commission: {req.parameters.get('commission')} (fraction)
 
-PARAMETER EDITING:
-If the user explicitly asks to change the target stock/symbol or any parameters, output a JSON block wrapped in {triple_ticks}json ... {triple_ticks} with ONLY the updated keys. Valid keys: "symbol", "startDate", "endDate", "initialCapital", "commission".
+YOUR WORKFLOW (STRICT - follow these steps in order):
 
-SYMBOL CHANGE WORKFLOW (CRITICAL):
-When the user asks to run the SAME strategy on a DIFFERENT symbol:
-1. Output the JSON block with the new symbol: {triple_ticks}json {{"symbol": "NEW_SYMBOL"}} {triple_ticks}
-2. IMMEDIATELY AFTER the JSON block, present the FULL STRATEGY SUMMARY using the HTML template below, with the NEW symbol shown
-3. Ask for approval: "Should I run this backtest now?"
-4. ONLY when the user approves, output the FULL Python code block (the strategy logic stays the same, just the symbol changes)
-This ensures the user sees a summary with the new symbol and can approve before execution.
+STEP 1 - UNDERSTAND THE STRATEGY:
+- Converse with the user to understand their desired strategy
+- Ask clarifying questions if needed
+- Once you understand the strategy, proceed to Step 2
 
-WORKFLOW:
-1. Converse to understand the desired strategy rules.
-2. BEFORE writing code, you MUST present a FULL SUMMARY of the strategy using EXACTLY this HTML template (strictly professional, NO emojis, NO asterisks):
+STEP 2 - PRESENT SUMMARY FOR APPROVAL:
+- Determine the TARGET SYMBOL for the backtest:
+  * If the user mentioned a specific ticker (AAPL, INTC, TSLA, etc.), use that ticker
+  * If no ticker mentioned, use the current chart symbol: {req.symbol}
+- Present the strategy summary using this EXACT HTML format:
+
+{triple_ticks}json
+{{"symbol": "TARGET_SYMBOL", "startDate": "YYYY-MM-DD", "endDate": "YYYY-MM-DD"}}
+{triple_ticks}
 
 <h3 style="margin: 0 0 10px 0; color: #d1d4dc;">Strategy Summary</h3>
 <div style="margin-left: 10px; border-left: 3px solid #2962ff; padding-left: 15px; margin-bottom: 15px;">
-  <span style="color: #787b86;">Target Symbol:</span> <b style="color: #2962ff;">{{req.symbol}}</b><br>
-  <span style="color: #787b86;">Date Range:</span> <b style="color: #d1d4dc;">{{req.parameters.get('startDate')}}</b> to <b style="color: #d1d4dc;">{{req.parameters.get('endDate')}}</b><br>
-  <span style="color: #787b86;">Initial Capital:</span> <b style="color: #089981;">${{req.parameters.get('initialCapital')}}</b><br>
-  <span style="color: #787b86;">Commission:</span> <b style="color: #f23645;">{{req.parameters.get('commission')}}</b>
+  <span style="color: #787b86;">Target Symbol:</span> <b style="color: #2962ff;">TARGET_SYMBOL</b><br>
+  <span style="color: #787b86;">Date Range:</span> <b style="color: #d1d4dc;">START_DATE</b> to <b style="color: #d1d4dc;">END_DATE</b><br>
+  <span style="color: #787b86;">Initial Capital:</span> <b style="color: #089981;">${req.parameters.get('initialCapital')}</b><br>
+  <span style="color: #787b86;">Commission:</span> <b style="color: #f23645;">{req.parameters.get('commission')}</b>
 </div>
 <h4 style="margin: 0 0 10px 0; color: #d1d4dc;">Strategy Rules</h4>
 <ul style="margin: 0 0 15px 20px; color: #d1d4dc;">
-  <li>(List the rules clearly here as list items)</li>
+  <li>(Rule 1)</li>
+  <li>(Rule 2)</li>
+  ...
 </ul>
 <b style="color: #089981;">Should I run this backtest now?</b>
 
-3. ONLY when the user explicitly approves, output the Python code wrapped in {triple_ticks}python ... {triple_ticks}.
+IMPORTANT: The JSON block MUST come BEFORE the HTML summary. Always include the symbol in the JSON block.
 
-CRITICAL ANTI-HALLUCINATION RULES:
-- NEVER INVENT OR OUTPUT FAKE BACKTEST RESULTS. You are an LLM, you cannot run backtests.
-- THE ONLY WAY to run a backtest is to output the FULL Python code block again.
-- When running on a new symbol, follow the SYMBOL CHANGE WORKFLOW above (JSON + summary + approval + code).
+STEP 3 - EXECUTE ON APPROVAL:
+- When the user approves (says "yes", "ok", "go ahead", "run it", etc.), output the Python code
+- Output ONLY the CustomStrategy class wrapped in {triple_ticks}python ... {triple_ticks}
+- DO NOT output the summary again, just the code
 
-STRATEGY MODIFICATION RULES (CRITICAL):
-- If the user asks to CHANGE, MODIFY, or TWEAK any aspect of the strategy (e.g., "change buy day from 2nd to 20th", "use 50-day SMA instead of 20-day", "buy on Monday instead of Tuesday"), you MUST:
-  1. Acknowledge the change briefly
-  2. Output the COMPLETE UPDATED Python code block with the modification applied
-  3. NEVER just reply with text saying you made the change - the system cannot detect changes without new code
-- Treat ANY request that modifies strategy logic as requiring FULL CODE OUTPUT.
+CRITICAL RULES:
 
-CODING RULES (STRICT):
-- Create a class named CustomStrategy inheriting from Strategy.
-- POSITION MANAGEMENT (CRITICAL):
-  1. To go long, use `self.buy()`.
-  2. When the user says "sell", they almost ALWAYS mean "close my existing position". To close a position and return to cash, you MUST use `self.position.close()`.
-  3. NEVER use `self.sell()` unless the user explicitly types the words "short" or "short selling".
-- IMPORTS: `Strategy`, `pandas`, `numpy`, and indicators like `SMA` are ALREADY imported in the environment! DO NOT import them. You may ONLY import standard Python libraries (e.g., `from datetime import timedelta`) if absolutely necessary.
-- DO NOT include data fetching or Backtest() calls. ONLY output the CustomStrategy class.
+1. SYMBOL DETECTION:
+   - ALWAYS check if the user mentions a stock ticker (AAPL, MSFT, GOOGL, AMZN, TSLA, NVDA, META, INTC, AMD, SPY, QQQ, etc.)
+   - If user says "buy INTC" or "strategy for AAPL" or "backtest on TSLA", extract that ticker
+   - Include the extracted ticker in the JSON block
 
-DATETIME AND CALENDAR LOGIC (CRITICAL):
-- Extract the current bar's datetime using: current_dt = self.data.index[-1]
-- For checking day of month: current_dt.day
-- For checking month: current_dt.month
-- For checking day of week: current_dt.weekday() (0=Monday, 4=Friday)
+2. ANTI-HALLUCINATION:
+   - NEVER invent or output fake backtest results
+   - You CANNOT run backtests - only the system can
+   - The ONLY way to trigger a backtest is to output Python code
 
-HANDLING NON-TRADING DAYS (weekends/holidays):
-- Markets are closed on weekends and holidays, so the exact date (e.g., "2nd of month") may not exist in data.
-- Use RANGE-BASED CHECKS instead of exact day matches:
-  - BAD:  if current_dt.day == 2:  # May miss if 2nd is a weekend
-  - GOOD: if 1 <= current_dt.day <= 3:  # Catches first trading day near the 2nd
-- For "buy on day X, sell on day Y" strategies, track state to ensure you only act once per period.
+3. STRATEGY MODIFICATIONS:
+   - If the user wants to change the strategy after seeing the summary, update and show a NEW summary
+   - If the user wants to change parameters (symbol, dates, etc.), show a NEW summary with updated values
+   - ALWAYS require approval before outputting code
 
-RECURRING TRADES (monthly/weekly patterns):
-- For MONTHLY recurring strategies, track state per month using (year, month) tuples:
-  ```python
-  def init(self):
-      self.last_action_month = None  # Track (year, month) of last action
+4. CODING RULES:
+   - Create a class named CustomStrategy inheriting from Strategy
+   - Use self.buy() to enter long positions
+   - Use self.position.close() to exit positions (NOT self.sell() unless shorting)
+   - Do NOT import anything - Strategy, pandas, numpy, SMA, EMA, RSI are pre-loaded
+   - Extract datetime: current_dt = self.data.index[-1]
+   - Handle weekends with range checks: if 1 <= current_dt.day <= 3 (not if current_dt.day == 2)
+   - For monthly recurring: track state with (year, month) tuples
 
-  def next(self):
-      current_dt = self.data.index[-1]
-      current_month = (current_dt.year, current_dt.month)
+5. MONTHLY STRATEGY EXAMPLE:
+   ```python
+   class CustomStrategy(Strategy):
+       def init(self):
+           self.last_buy_month = None
 
-      # Buy around the 2nd of each month (handle weekends: check day 1-3)
-      if 1 <= current_dt.day <= 3 and not self.position:
-          if self.last_action_month != current_month:
-              self.buy()
-              self.last_action_month = current_month
+       def next(self):
+           current_dt = self.data.index[-1]
+           current_month = (current_dt.year, current_dt.month)
 
-      # Sell around the 28th of each month (handle weekends: check day 27-31)
-      if current_dt.day >= 27 and self.position:
-          self.position.close()
-  ```
+           # Buy around day 2 (handle weekends)
+           if 1 <= current_dt.day <= 3 and not self.position:
+               if self.last_buy_month != current_month:
+                   self.buy()
+                   self.last_buy_month = current_month
 
-- For WEEKLY recurring strategies, use weekday checks:
-  ```python
-  # Buy on Monday (weekday 0), sell on Friday (weekday 4)
-  if current_dt.weekday() == 0 and not self.position:
-      self.buy()
-  if current_dt.weekday() == 4 and self.position:
-      self.position.close()
-  ```
-
-STATE FLAGS:
-- ONE-TIME trades (e.g., "buy in January 2024"): Use a simple boolean flag.
-- YEARLY recurring (e.g., "buy every January"): Track self.last_action_year.
-- MONTHLY recurring (e.g., "buy on 2nd, sell on 28th every month"): Track self.last_buy_month and self.last_sell_month as (year, month) tuples.
-- WEEKLY recurring: Usually no state needed, just check weekday.
-- ALWAYS check position state: use `if not self.position` before buying, `if self.position` before selling.
+           # Sell around day 28 (handle weekends)
+           if current_dt.day >= 27 and self.position:
+               self.position.close()
+   ```
 """
-    
+
     messages = [{"role": "system", "content": system_prompt}]
     for msg in req.chat_history:
         messages.append({"role": msg.role, "content": msg.content})
@@ -209,66 +205,85 @@ STATE FLAGS:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"LLM API Error: {str(e)}")
 
+    # Extract parameter updates (JSON block)
     param_update = None
     json_pattern = triple_ticks + r'json(.*?)' + triple_ticks
     json_match = re.search(json_pattern, llm_response, re.DOTALL)
-    
+
     if json_match:
         try:
             param_update = json.loads(json_match.group(1).strip())
-            
-            # If the AI decided to change the symbol, update the request immediately so we download the right data!
+            print(f"[SIMULATOR DEBUG] Extracted param_update: {param_update}")
+
+            # Update symbol if provided
             if "symbol" in param_update:
                 req.symbol = str(param_update["symbol"]).upper()
-                
+                print(f"[SIMULATOR DEBUG] Symbol updated to: {req.symbol}")
+
+            # Remove JSON block from response for display
             llm_response = re.sub(json_pattern, '', llm_response, flags=re.DOTALL).strip()
-            if not llm_response:
-                llm_response = "I have updated the parameters. Should I run the backtest now?"
-        except:
-            pass
+        except Exception as e:
+            print(f"[SIMULATOR DEBUG] Failed to parse JSON: {e}")
 
-    # Replace placeholders with potentially updated values
-    llm_response = llm_response.replace("{req.symbol}", req.symbol)
-    if param_update:
-        llm_response = llm_response.replace("{req.parameters.get('startDate')}", str(param_update.get('startDate', req.parameters.get('startDate'))))
-        llm_response = llm_response.replace("{req.parameters.get('endDate')}", str(param_update.get('endDate', req.parameters.get('endDate'))))
-        llm_response = llm_response.replace("{req.parameters.get('initialCapital')}", str(param_update.get('initialCapital', req.parameters.get('initialCapital'))))
-        llm_response = llm_response.replace("{req.parameters.get('commission')}", str(param_update.get('commission', req.parameters.get('commission'))))
-
+    # Extract Python code
     python_pattern = triple_ticks + r'python(.*?)' + triple_ticks
     code_match = re.search(python_pattern, llm_response, re.DOTALL)
-    
+
     strategy_code = None
     if code_match:
         strategy_code = code_match.group(1).strip()
+        print(f"[SIMULATOR DEBUG] Found Python code in response, length: {len(strategy_code)}")
 
-    # --- ANTI-HALLUCINATION AUTO-RECOVERY ---
-    # If the AI updated params or hallucinated results but forgot the code, grab the previous code from history!
-    if not strategy_code and (param_update or "Simulation complete" in llm_response or "Return:" in llm_response):
-        print(f"[SIMULATOR DEBUG] Anti-hallucination triggered. Searching chat history for code...")
+    # If user approved but LLM didn't output code, try to find code in history
+    if not strategy_code and is_approval(req.prompt):
+        print(f"[SIMULATOR DEBUG] User approved but no code in response. Searching history...")
         for msg in reversed(req.chat_history):
             prev_match = re.search(python_pattern, msg.content, re.DOTALL)
             if prev_match:
                 strategy_code = prev_match.group(1).strip()
-                print(f"[SIMULATOR DEBUG] Found previous code in history, length: {len(strategy_code)}")
+                print(f"[SIMULATOR DEBUG] Found code in history, length: {len(strategy_code)}")
                 break
-        if not strategy_code:
-            print(f"[SIMULATOR DEBUG] No code found in history!")
 
+        # Also try to find symbol from previous param_update in history
+        if not param_update:
+            for msg in reversed(req.chat_history):
+                json_hist_match = re.search(json_pattern, msg.content, re.DOTALL)
+                if json_hist_match:
+                    try:
+                        hist_params = json.loads(json_hist_match.group(1).strip())
+                        if "symbol" in hist_params:
+                            req.symbol = str(hist_params["symbol"]).upper()
+                            param_update = hist_params
+                            print(f"[SIMULATOR DEBUG] Found symbol in history: {req.symbol}")
+                            break
+                    except:
+                        pass
+
+    # If no code, return as chat reply (conversation continues)
     if not strategy_code:
         print(f"[SIMULATOR DEBUG] No strategy code - returning chat_reply")
-        return {"status": "chat_reply", "message": llm_response, "param_update": param_update}
+        return {
+            "status": "chat_reply",
+            "message": llm_response,
+            "param_update": param_update
+        }
+
+    # We have code - run the backtest!
+    print(f"[SIMULATOR DEBUG] Running backtest for symbol: {req.symbol}")
 
     try:
         start_date = req.parameters.get("startDate", "2023-01-01")
-        if param_update and "startDate" in param_update: start_date = param_update["startDate"]
+        if param_update and "startDate" in param_update:
+            start_date = param_update["startDate"]
 
         end_date = req.parameters.get("endDate", datetime.today().strftime('%Y-%m-%d'))
-        if param_update and "endDate" in param_update: end_date = param_update["endDate"]
+        if param_update and "endDate" in param_update:
+            end_date = param_update["endDate"]
 
-        print(f"[SIMULATOR DEBUG] Downloading data for symbol: {req.symbol}, from {start_date} to {end_date}")
+        print(f"[SIMULATOR DEBUG] Downloading data for {req.symbol} from {start_date} to {end_date}")
         df = yf.download(req.symbol, start=start_date, end=end_date, progress=False)
-        print(f"[SIMULATOR DEBUG] Downloaded {len(df)} rows for {req.symbol}")
+        print(f"[SIMULATOR DEBUG] Downloaded {len(df)} rows")
+
         if df.empty:
             raise ValueError(f"No data fetched for {req.symbol}")
         if isinstance(df.columns, pd.MultiIndex):
@@ -276,6 +291,7 @@ STATE FLAGS:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Data fetch error: {str(e)}")
 
+    # Setup execution environment
     exec_env = {}
     setup_code = """
 import pandas as pd
@@ -306,24 +322,31 @@ def RSI(values, n):
         error_msg = f"Failed to compile strategy code.\nError: {str(e)}\n\nCode generated:\n{strategy_code}"
         return {"status": "error", "message": error_msg, "param_update": param_update}
 
+    # Run backtest
     try:
         cash = float(req.parameters.get("initialCapital", 100000))
-        if param_update and "initialCapital" in param_update: cash = float(param_update["initialCapital"])
-        
+        if param_update and "initialCapital" in param_update:
+            cash = float(param_update["initialCapital"])
+
         comm = float(req.parameters.get("commission", 0.0))
-        if param_update and "commission" in param_update: comm = float(param_update["commission"])
-        
+        if param_update and "commission" in param_update:
+            comm = float(param_update["commission"])
+
         bt = Backtest(df, CustomStrategy, cash=cash, commission=comm, exclusive_orders=True)
         stats = bt.run()
-        
+
         trades_df = stats['_trades']
         if trades_df.empty:
-            return {"status": "error", "message": "The strategy successfully compiled, but it executed 0 trades over the selected period.", "param_update": param_update}
+            return {
+                "status": "error",
+                "message": "The strategy successfully compiled, but it executed 0 trades over the selected period.",
+                "param_update": param_update
+            }
 
+        # Extract trade markers and equity curve
         trade_markers = []
         equity_data = []
-        
-        # EXTRACT ACTUAL DATES FOR THE EQUITY CURVE
+
         if '_equity_curve' in stats and not stats['_equity_curve'].empty:
             eq_df = stats['_equity_curve']
             for dt, row in eq_df.iterrows():
@@ -336,11 +359,11 @@ def RSI(values, n):
             if eq["time"] != last_t:
                 unique_equity.append(eq)
                 last_t = eq["time"]
-        
+
         for idx, row in trades_df.iterrows():
             size = int(row['Size'])
             direction = "Buy" if size > 0 else "Sell"
-            
+
             trade_markers.append({
                 "time": int(row['EntryTime'].timestamp()),
                 "type": direction,
@@ -355,12 +378,20 @@ def RSI(values, n):
                 "size": abs(size)
             })
 
+        print(f"[SIMULATOR DEBUG] Backtest complete. Return: {stats.get('Return [%]', 0)}%")
+
+        # Always include symbol in param_update for frontend to change chart
+        if not param_update:
+            param_update = {}
+        param_update["symbol"] = req.symbol
+
         return {
             "status": "success",
             "message": "Strategy executed successfully.",
             "code": strategy_code,
             "param_update": param_update,
             "results": {
+                "symbol": req.symbol,
                 "return_pct": safe_float(stats.get('Return [%]', 0.0)),
                 "win_rate": safe_float(stats.get('Win Rate [%]', 0.0)),
                 "max_drawdown": safe_float(stats.get('Max. Drawdown [%]', 0.0)),
@@ -373,4 +404,8 @@ def RSI(values, n):
         }
 
     except Exception as e:
-        return {"status": "error", "message": f"Backtest execution error: {traceback.format_exc()}", "param_update": param_update}
+        return {
+            "status": "error",
+            "message": f"Backtest execution error: {traceback.format_exc()}",
+            "param_update": param_update
+        }

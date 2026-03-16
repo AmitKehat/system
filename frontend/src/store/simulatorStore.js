@@ -8,14 +8,14 @@ const STORAGE_KEY = 'quant_simulator_settings';
 export const useSimulatorStore = create(
   persist(
     (set, get) => ({
-      mode: 'single', 
+      mode: 'single',
       provider: 'openai',
       apiKeys: { openai: '', anthropic: '', gemini: '' },
       parameters: {
         startDate: '2023-01-01',
         endDate: new Date().toISOString().split('T')[0],
         initialCapital: 100000,
-        commission: 0.001, 
+        commission: 0.001,
       },
       chatHistory: [],
       isProcessing: false,
@@ -25,13 +25,13 @@ export const useSimulatorStore = create(
       setProvider: (provider) => set({ provider }),
       setApiKey: (provider, key) => set((state) => ({ apiKeys: { ...state.apiKeys, [provider]: key } })),
       updateParams: (updates) => set((state) => ({ parameters: { ...state.parameters, ...updates } })),
-      
+
       clearChat: () => set({ chatHistory: [], results: null }),
 
       sendMessage: async (prompt, symbol) => {
         const { provider, apiKeys, chatHistory, parameters, mode } = get();
         const apiKey = apiKeys[provider];
-        
+
         if (!apiKey) {
             set({ chatHistory: [...chatHistory, { role: 'user', content: prompt }, { role: 'system', content: `Please configure your ${provider.toUpperCase()} API key in the settings tab first.` }]});
             return;
@@ -56,29 +56,27 @@ export const useSimulatorStore = create(
 
           const data = await res.json();
 
-          // Handle parameter updates
-          let pendingSymbolChange = null;
-          if (data.param_update) {
-              // Store symbol change for later - only apply after successful backtest
-              if (data.param_update.symbol) {
-                  pendingSymbolChange = data.param_update.symbol;
-                  delete data.param_update.symbol;
-              }
-              // Update any remaining strategy parameters immediately (dates, capital, etc.)
-              if (Object.keys(data.param_update).length > 0) {
-                  get().updateParams(data.param_update);
-              }
-          }
-
           if (data.status === 'success') {
-              // NOW change the chart symbol (after successful backtest)
-              if (pendingSymbolChange) {
-                  useChartStore.getState().setSymbol(pendingSymbolChange);
+              // Backtest completed - NOW change the chart to the backtest symbol
+              if (data.param_update && data.param_update.symbol) {
+                  useChartStore.getState().setSymbol(data.param_update.symbol);
+              }
+
+              // Update date parameters if they were changed
+              if (data.param_update) {
+                  const paramUpdates = {};
+                  if (data.param_update.startDate) paramUpdates.startDate = data.param_update.startDate;
+                  if (data.param_update.endDate) paramUpdates.endDate = data.param_update.endDate;
+                  if (data.param_update.initialCapital) paramUpdates.initialCapital = data.param_update.initialCapital;
+                  if (data.param_update.commission) paramUpdates.commission = data.param_update.commission;
+                  if (Object.keys(paramUpdates).length > 0) {
+                      get().updateParams(paramUpdates);
+                  }
               }
 
               set({
                   results: data.results,
-                  chatHistory: [...newHistory, { role: 'assistant', content: `Simulation complete!\n\nReturn: ${data.results.return_pct.toFixed(2)}%\nWin Rate: ${data.results.win_rate.toFixed(2)}%\nMax DD: ${data.results.max_drawdown.toFixed(2)}%\n\nI have overlaid the trades on your chart.` }]
+                  chatHistory: [...newHistory, { role: 'assistant', content: `Simulation complete!\n\nSymbol: ${data.results.symbol}\nReturn: ${data.results.return_pct.toFixed(2)}%\nWin Rate: ${data.results.win_rate.toFixed(2)}%\nMax DD: ${data.results.max_drawdown.toFixed(2)}%\nTrades: ${data.results.total_trades}\n\nI have overlaid the trades on your chart.` }]
               });
 
               // --- Automatically register the strategy as a chart indicator ---
@@ -92,7 +90,12 @@ export const useSimulatorStore = create(
                       chartStore.toggleIndicatorVisibility(strategyInd.id);
                   }
               }
+          } else if (data.status === 'chat_reply') {
+              // Conversation continues - do NOT change the chart yet
+              // Store the assistant's message (which includes the summary)
+              set({ chatHistory: [...newHistory, { role: 'assistant', content: data.message }] });
           } else {
+              // Error status
               set({ chatHistory: [...newHistory, { role: 'assistant', content: data.message }] });
           }
         } catch (e) {
