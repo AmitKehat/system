@@ -898,14 +898,34 @@ function EquityCurvePane({ results, theme, onClose }) {
     const initHeight = rect.height > 0 ? rect.height : 200;
 
     const baseOptions = getChartOptions(theme, true);
-    
+
     // OVERRIDE: Lock user interactions and strictly fix edges
+    // Enable vertical crosshair for equity curve
     const chartOptions = {
         ...baseOptions,
         width: initWidth,
         height: initHeight,
         handleScroll: false, // Prevents panning/scrolling
         handleScale: false,  // Prevents zooming
+        crosshair: {
+            mode: 1, // Normal crosshair mode
+            vertLine: {
+                visible: true,
+                color: theme === 'dark' ? '#758696' : '#9598a1',
+                width: 1,
+                style: 2, // Dashed
+                labelVisible: true,
+                labelBackgroundColor: theme === 'dark' ? '#2a2e39' : '#f0f3fa',
+            },
+            horzLine: {
+                visible: true,
+                color: theme === 'dark' ? '#758696' : '#9598a1',
+                width: 1,
+                style: 2,
+                labelVisible: true,
+                labelBackgroundColor: theme === 'dark' ? '#2a2e39' : '#f0f3fa',
+            }
+        },
         timeScale: {
             ...baseOptions.timeScale,
             rightOffset: 0,       // Removes empty space on the right edge

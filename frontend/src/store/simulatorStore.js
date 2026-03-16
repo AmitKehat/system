@@ -57,9 +57,18 @@ export const useSimulatorStore = create(
           const data = await res.json();
 
           if (data.status === 'success') {
-              // Backtest completed - NOW change the chart to the backtest symbol
+              // Backtest completed - change chart to backtest symbol ONLY if different
               if (data.param_update && data.param_update.symbol) {
-                  useChartStore.getState().setSymbol(data.param_update.symbol);
+                  const currentSymbol = useChartStore.getState().symbol;
+                  console.log(`[SIMULATOR] Backend symbol: ${data.param_update.symbol}, Current chart: ${currentSymbol}`);
+                  if (data.param_update.symbol.toUpperCase() !== currentSymbol.toUpperCase()) {
+                      console.log(`[SIMULATOR] Changing chart from ${currentSymbol} to ${data.param_update.symbol}`);
+                      useChartStore.getState().setSymbol(data.param_update.symbol);
+                  } else {
+                      console.log(`[SIMULATOR] Symbol unchanged, not reloading chart`);
+                  }
+              } else {
+                  console.log(`[SIMULATOR] No symbol in param_update:`, data.param_update);
               }
 
               // Update date parameters if they were changed

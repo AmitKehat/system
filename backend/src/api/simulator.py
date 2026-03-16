@@ -87,6 +87,56 @@ def is_approval(prompt: str) -> bool:
     ]
     return any(phrase in prompt_lower for phrase in approval_phrases)
 
+def extract_symbol_from_text(text: str) -> Optional[str]:
+    """
+    Extract a stock ticker symbol from user text.
+    Returns the first valid ticker found, or None if no ticker detected.
+    """
+    # Common stock tickers - prioritize explicit mentions
+    known_tickers = [
+        "AAPL", "MSFT", "GOOGL", "GOOG", "AMZN", "TSLA", "NVDA", "META", "NFLX",
+        "AMD", "INTC", "IBM", "ORCL", "CRM", "ADBE", "PYPL", "SQ", "SHOP",
+        "SPY", "QQQ", "DIA", "IWM", "VTI", "VOO",
+        "JPM", "BAC", "WFC", "GS", "MS", "C",
+        "XOM", "CVX", "COP", "BP", "SLB",
+        "JNJ", "PFE", "UNH", "MRK", "ABBV", "LLY",
+        "KO", "PEP", "MCD", "SBUX", "NKE", "DIS",
+        "HD", "LOW", "TGT", "WMT", "COST", "AMZN",
+        "BA", "CAT", "GE", "MMM", "HON",
+        "V", "MA", "AXP",
+    ]
+
+    text_upper = text.upper()
+
+    # First, look for explicit patterns like "for NVDA", "on TSLA", "run AAPL"
+    explicit_patterns = [
+        r'\bfor\s+([A-Z]{1,5})\b',
+        r'\bon\s+([A-Z]{1,5})\b',
+        r'\brun\s+([A-Z]{1,5})\b',
+        r'\bbacktest\s+([A-Z]{1,5})\b',
+        r'\btest\s+([A-Z]{1,5})\b',
+        r'\bwith\s+([A-Z]{1,5})\b',
+        r'\busing\s+([A-Z]{1,5})\b',
+        r'\bswitch\s+to\s+([A-Z]{1,5})\b',
+        r'\bchange\s+to\s+([A-Z]{1,5})\b',
+        r'\btry\s+([A-Z]{1,5})\b',
+    ]
+
+    for pattern in explicit_patterns:
+        match = re.search(pattern, text_upper)
+        if match:
+            potential_ticker = match.group(1)
+            if potential_ticker in known_tickers:
+                return potential_ticker
+
+    # Then check for any known ticker mentioned in the text
+    for ticker in known_tickers:
+        # Use word boundary to avoid matching substrings
+        if re.search(r'\b' + ticker + r'\b', text_upper):
+            return ticker
+
+    return None
+
 @router.post("/run")
 async def run_simulation(req: SimulatorRequest):
     print(f"[SIMULATOR DEBUG] Request received - symbol: {req.symbol}, prompt: {req.prompt[:50]}...")
@@ -244,22 +294,42 @@ CRITICAL RULES:
                 print(f"[SIMULATOR DEBUG] Found code in history, length: {len(strategy_code)}")
                 break
 
-    # ALWAYS search history for symbol/params if we don't have them yet
-    # This handles the case where LLM outputs code but not the JSON block on approval
-    if not param_update and strategy_code:
-        print(f"[SIMULATOR DEBUG] Have code but no param_update. Searching history for params...")
-        for msg in reversed(req.chat_history):
-            json_hist_match = re.search(json_pattern, msg.content, re.DOTALL)
-            if json_hist_match:
-                try:
-                    hist_params = json.loads(json_hist_match.group(1).strip())
-                    if "symbol" in hist_params:
-                        req.symbol = str(hist_params["symbol"]).upper()
-                        param_update = hist_params
-                        print(f"[SIMULATOR DEBUG] Found params in history: {param_update}")
-                        break
-                except:
-                    pass
+    # If we have code but no param_update, we need to determine the symbol
+    # PRIORITY ORDER:
+    # 1. Check user's CURRENT prompt for a new symbol (e.g., "run for NVDA")
+    # 2. Check LLM response for a symbol mention
+    # 3. Fall back to history search for params (but NOT for symbol if user specified one)
+    if strategy_code:
+        user_prompt_symbol = extract_symbol_from_text(req.prompt)
+        llm_response_symbol = extract_symbol_from_text(llm_response)
+
+        if user_prompt_symbol:
+            print(f"[SIMULATOR DEBUG] Found symbol in user prompt: {user_prompt_symbol}")
+            req.symbol = user_prompt_symbol
+            if not param_update:
+                param_update = {}
+            param_update["symbol"] = user_prompt_symbol
+        elif llm_response_symbol:
+            print(f"[SIMULATOR DEBUG] Found symbol in LLM response: {llm_response_symbol}")
+            req.symbol = llm_response_symbol
+            if not param_update:
+                param_update = {}
+            param_update["symbol"] = llm_response_symbol
+        elif not param_update:
+            # Only search history if we have NO symbol from current context
+            print(f"[SIMULATOR DEBUG] No symbol in current context. Searching history for params...")
+            for msg in reversed(req.chat_history):
+                json_hist_match = re.search(json_pattern, msg.content, re.DOTALL)
+                if json_hist_match:
+                    try:
+                        hist_params = json.loads(json_hist_match.group(1).strip())
+                        if "symbol" in hist_params:
+                            req.symbol = str(hist_params["symbol"]).upper()
+                            param_update = hist_params
+                            print(f"[SIMULATOR DEBUG] Found params in history: {param_update}")
+                            break
+                    except:
+                        pass
 
     # If no code, return as chat reply (conversation continues)
     if not strategy_code:
