@@ -78,6 +78,7 @@ def call_llm(provider: str, api_key: str, messages: List[Dict[str, str]]) -> str
 
 @router.post("/run")
 async def run_simulation(req: SimulatorRequest):
+    print(f"[SIMULATOR DEBUG] Request received - symbol: {req.symbol}, prompt: {req.prompt[:50]}...")
     if not req.api_key:
         raise HTTPException(status_code=400, detail="API Key is required.")
 
@@ -256,11 +257,13 @@ STATE FLAGS:
     try:
         start_date = req.parameters.get("startDate", "2023-01-01")
         if param_update and "startDate" in param_update: start_date = param_update["startDate"]
-        
+
         end_date = req.parameters.get("endDate", datetime.today().strftime('%Y-%m-%d'))
         if param_update and "endDate" in param_update: end_date = param_update["endDate"]
 
+        print(f"[SIMULATOR DEBUG] Downloading data for symbol: {req.symbol}, from {start_date} to {end_date}")
         df = yf.download(req.symbol, start=start_date, end=end_date, progress=False)
+        print(f"[SIMULATOR DEBUG] Downloaded {len(df)} rows for {req.symbol}")
         if df.empty:
             raise ValueError(f"No data fetched for {req.symbol}")
         if isinstance(df.columns, pd.MultiIndex):

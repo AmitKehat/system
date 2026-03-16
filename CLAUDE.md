@@ -68,12 +68,13 @@ uvicorn src.api.main:app --host 0.0.0.0 --port 8000
 celery -A src.worker.celery_app.celery_app worker --loglevel=INFO
 ```
 
-### Docker (Full Stack)
+### Docker (Full Stack on Remote Server)
 ```bash
 cd backend
-docker-compose up -d              # Start all services
-docker-compose logs -f api        # View API logs
-docker-compose down               # Stop services
+docker compose up -d              # Start all services
+docker compose logs -f api        # View API logs
+docker compose down               # Stop services
+docker compose build api          # Rebuild API container after code changes
 ```
 
 ### Database Migrations
