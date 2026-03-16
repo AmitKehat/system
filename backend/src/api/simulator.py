@@ -104,7 +104,10 @@ def extract_symbol_from_text(text: str) -> Optional[str]:
         "THAT", "WITH", "FROM", "YEAR", "ONLY", "WANT", "CELL", "CROSS", "ABOVE",
         "BELOW", "PRICE", "START", "STOP", "WHEN", "THEN", "ALSO", "JUST", "LIKE",
         "MAKE", "TAKE", "GIVE", "KEEP", "HOLD", "SHOW", "WORK", "MOVE", "HELP",
-        "EMA", "SMA", "RSI", "MACD", "ATR", "ADX", "CODE", "NEXT", "LAST", "FIRST"
+        "EMA", "SMA", "RSI", "MACD", "ATR", "ADX", "CODE", "NEXT", "LAST", "FIRST",
+        # Python keywords that appear in strategy code
+        "CLASS", "DEF", "SELF", "INIT", "TRUE", "FALSE", "NONE", "RETURN", "NOT",
+        "DATA", "INDEX", "CLOSE", "OPEN", "VOLUME", "POSITION", "STRATEGY",
     }
 
     # First, look for explicit patterns like "for NVDA", "on TSLA", "run AAPL"
@@ -305,8 +308,8 @@ CRITICAL RULES:
     # PRIORITY ORDER (user's current request ALWAYS takes precedence):
     # 1. Check user's CURRENT prompt for a new symbol (e.g., "run for NVDA") - HIGHEST PRIORITY
     # 2. Use param_update from LLM response if it contains a symbol
-    # 3. Check LLM response text for a symbol mention
-    # 4. Fall back to history search for params
+    # 3. Search history for symbol (important for approval messages like "yes")
+    # 4. Extract from LLM response text (LAST RESORT - avoid picking up code keywords)
     if strategy_code:
         print(f"[SIMULATOR DEBUG] User prompt: '{req.prompt}'")
         user_prompt_symbol = extract_symbol_from_text(req.prompt)
@@ -324,36 +327,44 @@ CRITICAL RULES:
             print(f"[SIMULATOR DEBUG] Using symbol from LLM JSON block: {param_update['symbol']}")
             req.symbol = str(param_update["symbol"]).upper()
         else:
-            # Try to find symbol in LLM response text
-            llm_response_symbol = extract_symbol_from_text(llm_response)
-            print(f"[SIMULATOR DEBUG] Extracted from LLM response: {llm_response_symbol}")
+            # Search history FIRST (especially important for "yes" approval messages)
+            print(f"[SIMULATOR DEBUG] No symbol in current context. Searching history first...")
+            print(f"[SIMULATOR DEBUG] Chat history length: {len(req.chat_history)}")
+            found_in_history = False
+            for i, msg in enumerate(reversed(req.chat_history)):
+                json_hist_match = re.search(json_pattern, msg.content, re.DOTALL)
+                if json_hist_match:
+                    try:
+                        hist_params = json.loads(json_hist_match.group(1).strip())
+                        print(f"[SIMULATOR DEBUG] Found JSON in history msg {len(req.chat_history) - 1 - i}: {hist_params}")
+                        if "symbol" in hist_params:
+                            req.symbol = str(hist_params["symbol"]).upper()
+                            if not param_update:
+                                param_update = hist_params
+                            else:
+                                param_update["symbol"] = req.symbol
+                            print(f"[SIMULATOR DEBUG] Using symbol from history: {req.symbol}")
+                            found_in_history = True
+                            break
+                    except Exception as e:
+                        print(f"[SIMULATOR DEBUG] Failed to parse history JSON: {e}")
 
-            if llm_response_symbol:
-                print(f"[SIMULATOR DEBUG] Using symbol from LLM response text: {llm_response_symbol}")
-                req.symbol = llm_response_symbol
-                if not param_update:
-                    param_update = {}
-                param_update["symbol"] = llm_response_symbol
-            else:
-                # Fall back to history search
-                print(f"[SIMULATOR DEBUG] No symbol found. Searching history...")
-                print(f"[SIMULATOR DEBUG] Chat history length: {len(req.chat_history)}")
-                for i, msg in enumerate(reversed(req.chat_history)):
-                    json_hist_match = re.search(json_pattern, msg.content, re.DOTALL)
-                    if json_hist_match:
-                        try:
-                            hist_params = json.loads(json_hist_match.group(1).strip())
-                            print(f"[SIMULATOR DEBUG] Found JSON in history msg {len(req.chat_history) - 1 - i}: {hist_params}")
-                            if "symbol" in hist_params:
-                                req.symbol = str(hist_params["symbol"]).upper()
-                                if not param_update:
-                                    param_update = hist_params
-                                else:
-                                    param_update["symbol"] = req.symbol
-                                print(f"[SIMULATOR DEBUG] Using symbol from history: {req.symbol}")
-                                break
-                        except Exception as e:
-                            print(f"[SIMULATOR DEBUG] Failed to parse history JSON: {e}")
+            # Only try LLM response text as LAST RESORT (and avoid if code is present)
+            if not found_in_history:
+                print(f"[SIMULATOR DEBUG] No symbol in history. Trying LLM response text (last resort)...")
+                # Don't extract from code blocks - strip them first
+                llm_text_no_code = re.sub(r'```python.*?```', '', llm_response, flags=re.DOTALL)
+                llm_response_symbol = extract_symbol_from_text(llm_text_no_code)
+                print(f"[SIMULATOR DEBUG] Extracted from LLM response (no code): {llm_response_symbol}")
+
+                if llm_response_symbol:
+                    print(f"[SIMULATOR DEBUG] Using symbol from LLM response text: {llm_response_symbol}")
+                    req.symbol = llm_response_symbol
+                    if not param_update:
+                        param_update = {}
+                    param_update["symbol"] = llm_response_symbol
+                else:
+                    print(f"[SIMULATOR DEBUG] WARNING: Could not determine symbol! Using request symbol: {req.symbol}")
 
     # If no code, return as chat reply (conversation continues)
     if not strategy_code:
