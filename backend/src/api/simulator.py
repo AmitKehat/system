@@ -245,13 +245,18 @@ STATE FLAGS:
     # --- ANTI-HALLUCINATION AUTO-RECOVERY ---
     # If the AI updated params or hallucinated results but forgot the code, grab the previous code from history!
     if not strategy_code and (param_update or "Simulation complete" in llm_response or "Return:" in llm_response):
+        print(f"[SIMULATOR DEBUG] Anti-hallucination triggered. Searching chat history for code...")
         for msg in reversed(req.chat_history):
             prev_match = re.search(python_pattern, msg.content, re.DOTALL)
             if prev_match:
                 strategy_code = prev_match.group(1).strip()
+                print(f"[SIMULATOR DEBUG] Found previous code in history, length: {len(strategy_code)}")
                 break
+        if not strategy_code:
+            print(f"[SIMULATOR DEBUG] No code found in history!")
 
     if not strategy_code:
+        print(f"[SIMULATOR DEBUG] No strategy code - returning chat_reply")
         return {"status": "chat_reply", "message": llm_response, "param_update": param_update}
 
     try:

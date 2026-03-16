@@ -56,21 +56,27 @@ export const useSimulatorStore = create(
 
           const data = await res.json();
 
-          // Intercept parameter updates (INCLUDING SYMBOL CHANGES)
+          // Handle parameter updates
+          let pendingSymbolChange = null;
           if (data.param_update) {
+              // Store symbol change for later - only apply after successful backtest
               if (data.param_update.symbol) {
-                  // Force the main chart to instantly switch to the new symbol
-                  useChartStore.getState().setSymbol(data.param_update.symbol);
+                  pendingSymbolChange = data.param_update.symbol;
                   delete data.param_update.symbol;
               }
-              // Update any remaining strategy parameters
+              // Update any remaining strategy parameters immediately (dates, capital, etc.)
               if (Object.keys(data.param_update).length > 0) {
                   get().updateParams(data.param_update);
               }
           }
 
           if (data.status === 'success') {
-              set({ 
+              // NOW change the chart symbol (after successful backtest)
+              if (pendingSymbolChange) {
+                  useChartStore.getState().setSymbol(pendingSymbolChange);
+              }
+
+              set({
                   results: data.results,
                   chatHistory: [...newHistory, { role: 'assistant', content: `Simulation complete!\n\nReturn: ${data.results.return_pct.toFixed(2)}%\nWin Rate: ${data.results.win_rate.toFixed(2)}%\nMax DD: ${data.results.max_drawdown.toFixed(2)}%\n\nI have overlaid the trades on your chart.` }]
               });
