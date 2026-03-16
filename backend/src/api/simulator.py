@@ -220,8 +220,8 @@ CRITICAL RULES:
                 req.symbol = str(param_update["symbol"]).upper()
                 print(f"[SIMULATOR DEBUG] Symbol updated to: {req.symbol}")
 
-            # Remove JSON block from response for display
-            llm_response = re.sub(json_pattern, '', llm_response, flags=re.DOTALL).strip()
+            # DO NOT remove JSON block from response - we need it in chat history for later recovery
+            # The frontend will hide it from display
         except Exception as e:
             print(f"[SIMULATOR DEBUG] Failed to parse JSON: {e}")
 
@@ -244,20 +244,22 @@ CRITICAL RULES:
                 print(f"[SIMULATOR DEBUG] Found code in history, length: {len(strategy_code)}")
                 break
 
-        # Also try to find symbol from previous param_update in history
-        if not param_update:
-            for msg in reversed(req.chat_history):
-                json_hist_match = re.search(json_pattern, msg.content, re.DOTALL)
-                if json_hist_match:
-                    try:
-                        hist_params = json.loads(json_hist_match.group(1).strip())
-                        if "symbol" in hist_params:
-                            req.symbol = str(hist_params["symbol"]).upper()
-                            param_update = hist_params
-                            print(f"[SIMULATOR DEBUG] Found symbol in history: {req.symbol}")
-                            break
-                    except:
-                        pass
+    # ALWAYS search history for symbol/params if we don't have them yet
+    # This handles the case where LLM outputs code but not the JSON block on approval
+    if not param_update and strategy_code:
+        print(f"[SIMULATOR DEBUG] Have code but no param_update. Searching history for params...")
+        for msg in reversed(req.chat_history):
+            json_hist_match = re.search(json_pattern, msg.content, re.DOTALL)
+            if json_hist_match:
+                try:
+                    hist_params = json.loads(json_hist_match.group(1).strip())
+                    if "symbol" in hist_params:
+                        req.symbol = str(hist_params["symbol"]).upper()
+                        param_update = hist_params
+                        print(f"[SIMULATOR DEBUG] Found params in history: {param_update}")
+                        break
+                except:
+                    pass
 
     # If no code, return as chat reply (conversation continues)
     if not strategy_code:

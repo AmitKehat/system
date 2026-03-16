@@ -2,6 +2,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useSimulatorStore } from '../../store/simulatorStore';
 import { useChartStore } from '../../store/chartStore';
 
+// Strip JSON code blocks from message for display (but keep in history for backend)
+function stripJsonBlocks(content) {
+    return content.replace(/```json[\s\S]*?```/g, '').trim();
+}
+
 export default function SimulatorPanel() {
   const { 
       mode, setMode, provider, setProvider, apiKeys, setApiKey, 
@@ -99,22 +104,22 @@ export default function SimulatorPanel() {
                           </div>
                       )}
                       {chatHistory.map((msg, i) => (
-                          <div key={i} style={{ 
-                              alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start', 
-                              background: msg.role === 'user' ? '#2962ff' : 'var(--tv-color-popup-background, #1e222d)', 
-                              border: msg.role === 'user' ? 'none' : '1px solid var(--tv-color-border, #2a2e39)', 
-                              padding: '12px 16px', 
-                              borderRadius: '8px', 
-                              maxWidth: '90%', 
-                              fontSize: '13px', 
-                              whiteSpace: 'pre-wrap', 
+                          <div key={i} style={{
+                              alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
+                              background: msg.role === 'user' ? '#2962ff' : 'var(--tv-color-popup-background, #1e222d)',
+                              border: msg.role === 'user' ? 'none' : '1px solid var(--tv-color-border, #2a2e39)',
+                              padding: '12px 16px',
+                              borderRadius: '8px',
+                              maxWidth: '90%',
+                              fontSize: '13px',
+                              whiteSpace: 'pre-wrap',
                               wordBreak: 'break-word',
                               lineHeight: '1.4'
                           }}>
                               {msg.role === 'user' ? (
                                   msg.content
                               ) : (
-                                  <div dangerouslySetInnerHTML={{ __html: msg.content }} />
+                                  <div dangerouslySetInnerHTML={{ __html: stripJsonBlocks(msg.content) }} />
                               )}
                           </div>
                       ))}
