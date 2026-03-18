@@ -156,7 +156,7 @@ export const useChartStore = create(
         activeSettingsIndicator: null,
 
         // Actions
-        setSymbol: (symbol) => set({ 
+        setSymbol: (symbol) => set({
             symbol: symbol.toUpperCase().trim(),
             bars: [], // INSTANTLY clear old chart data to prevent old candles from lingering
             loading: true,

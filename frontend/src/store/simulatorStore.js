@@ -66,10 +66,10 @@ export const useSimulatorStore = create(
                   const currentSymbol = useChartStore.getState().symbol;
                   console.log(`[SIMULATOR] Backtest symbol: ${backtestSymbol}, Current chart: ${currentSymbol}`);
                   if (backtestSymbol.toUpperCase() !== currentSymbol.toUpperCase()) {
-                      console.log(`[SIMULATOR] Changing chart from ${currentSymbol} to ${backtestSymbol}`);
+                      console.log(`[SIMULATOR] Calling setSymbol to change chart from ${currentSymbol} to ${backtestSymbol}`);
                       useChartStore.getState().setSymbol(backtestSymbol);
                   } else {
-                      console.log(`[SIMULATOR] Chart already on correct symbol: ${currentSymbol}`);
+                      console.log(`[SIMULATOR] Chart already on correct symbol, NOT calling setSymbol`);
                   }
               } else {
                   console.log(`[SIMULATOR] WARNING: No symbol in results or param_update!`, data);

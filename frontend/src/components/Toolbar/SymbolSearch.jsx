@@ -44,11 +44,13 @@ export default function SymbolSearch() {
       if (!debouncedQuery || debouncedQuery.length < 1) {
         setMatches([]);
         setIsOpen(false);
+        setLoading(false);  // Clear loading when no query
         return;
       }
-      
+
       if (debouncedQuery.toUpperCase() === symbol) {
         setIsOpen(false);
+        setLoading(false);  // Clear loading when query matches current symbol
         return;
       }
       

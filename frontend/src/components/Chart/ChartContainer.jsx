@@ -371,7 +371,6 @@ export default function ChartContainer() {
           store.setBars([]);
         }
       } finally {
-        // Always clear loading state when done, even if cancelled
         if (!cancelled) {
           store.setLoading(false);
         }
@@ -379,7 +378,10 @@ export default function ChartContainer() {
     };
 
     const debounce = setTimeout(loadData, 300);
-    return () => { cancelled = true; clearTimeout(debounce); };
+    return () => {
+      cancelled = true;
+      clearTimeout(debounce);
+    };
   }, [symbol, barSize, duration, useRTH, lastReload]);
 
   useEffect(() => {
