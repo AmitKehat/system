@@ -89,7 +89,12 @@ export const useSimulatorStore = create(
 
               set({
                   results: data.results,
-                  chatHistory: [...newHistory, { role: 'assistant', content: `Simulation complete!\n\nSymbol: ${data.results.symbol}\nReturn: ${data.results.return_pct.toFixed(2)}%\nWin Rate: ${data.results.win_rate.toFixed(2)}%\nMax DD: ${data.results.max_drawdown.toFixed(2)}%\nTrades: ${data.results.total_trades}\n\nI have overlaid the trades on your chart.` }]
+                  // Store the code in a hidden format so it can be found by history search
+                  // The backend searches for ```python...``` blocks in history
+                  chatHistory: [...newHistory, {
+                      role: 'assistant',
+                      content: `Simulation complete!\n\nSymbol: ${data.results.symbol}\nReturn: ${data.results.return_pct.toFixed(2)}%\nWin Rate: ${data.results.win_rate.toFixed(2)}%\nMax DD: ${data.results.max_drawdown.toFixed(2)}%\nTrades: ${data.results.total_trades}\n\nI have overlaid the trades on your chart.${data.code ? `\n\n\`\`\`python\n${data.code}\n\`\`\`` : ''}`
+                  }]
               });
 
               // --- Automatically register the strategy as a chart indicator ---

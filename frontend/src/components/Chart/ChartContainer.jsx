@@ -349,7 +349,7 @@ export default function ChartContainer() {
 
     const loadData = async () => {
       if (!symbol) return;
-      
+
       const store = useChartStore.getState();
       store.setLoading(true);
       store.setError(null);
@@ -369,6 +369,11 @@ export default function ChartContainer() {
         if (!cancelled) {
           store.setError(err.message || 'Failed to load data');
           store.setBars([]);
+        }
+      } finally {
+        // Always clear loading state when done, even if cancelled
+        if (!cancelled) {
+          store.setLoading(false);
         }
       }
     };

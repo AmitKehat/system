@@ -2,9 +2,12 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useSimulatorStore } from '../../store/simulatorStore';
 import { useChartStore } from '../../store/chartStore';
 
-// Strip JSON code blocks from message for display (but keep in history for backend)
-function stripJsonBlocks(content) {
-    return content.replace(/```json[\s\S]*?```/g, '').trim();
+// Strip JSON and Python code blocks from message for display (but keep in history for backend)
+function stripCodeBlocks(content) {
+    return content
+        .replace(/```json[\s\S]*?```/g, '')
+        .replace(/```python[\s\S]*?```/g, '')
+        .trim();
 }
 
 export default function SimulatorPanel() {
@@ -119,7 +122,7 @@ export default function SimulatorPanel() {
                               {msg.role === 'user' ? (
                                   msg.content
                               ) : (
-                                  <div dangerouslySetInnerHTML={{ __html: stripJsonBlocks(msg.content) }} />
+                                  <div dangerouslySetInnerHTML={{ __html: stripCodeBlocks(msg.content) }} />
                               )}
                           </div>
                       ))}

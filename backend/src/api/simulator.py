@@ -180,7 +180,7 @@ STEP 2 - PRESENT SUMMARY FOR APPROVAL:
 - Present the strategy summary using this EXACT HTML format:
 
 {triple_ticks}json
-{{"symbol": "TARGET_SYMBOL", "startDate": "YYYY-MM-DD", "endDate": "YYYY-MM-DD"}}
+{{"symbol": "TARGET_SYMBOL", "startDate": "YYYY-MM-DD", "endDate": "YYYY-MM-DD", "initialCapital": CAPITAL_NUMBER}}
 {triple_ticks}
 
 <h3 style="margin: 0 0 10px 0; color: #d1d4dc;">Strategy Summary</h3>
