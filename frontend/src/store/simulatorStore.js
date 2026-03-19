@@ -59,6 +59,7 @@ export const useSimulatorStore = create(
           if (data.status === 'success') {
               console.log(`[SIMULATOR] Backtest SUCCESS - Full response:`, data);
               console.log(`[SIMULATOR] Results symbol: ${data.results?.symbol}, Equity curve length: ${data.results?.equity_curve?.length}`);
+              console.log(`[SIMULATOR] Code hash: ${data.code_hash}, Strategy name: ${data.strategy_name}`);
 
               // Backtest completed - ALWAYS sync chart to backtest symbol
               const backtestSymbol = data.results?.symbol || data.param_update?.symbol;
@@ -97,17 +98,15 @@ export const useSimulatorStore = create(
                   }]
               });
 
-              // --- Automatically register the strategy as a chart indicator ---
+              // --- Register strategy indicator using the new hash-based system ---
               const chartStore = useChartStore.getState();
-              const hasStrategy = chartStore.indicators.some(i => i.type === 'strategy');
-              if (!hasStrategy) {
-                  chartStore.addIndicator('strategy');
-              } else {
-                  const strategyInd = chartStore.indicators.find(i => i.type === 'strategy');
-                  if (strategyInd && strategyInd.visible === false) {
-                      chartStore.toggleIndicatorVisibility(strategyInd.id);
-                  }
-              }
+              chartStore.addOrUpdateStrategyIndicator({
+                  codeHash: data.code_hash,
+                  strategyName: data.strategy_name || 'Custom Strategy',
+                  trades: data.results.trades,
+                  symbol: backtestSymbol
+              });
+              console.log(`[SIMULATOR] Strategy indicator registered with hash: ${data.code_hash}`);
           } else if (data.status === 'chat_reply') {
               // Conversation continues - do NOT change the chart yet
               // Store the assistant's message (which includes the summary)

@@ -58,7 +58,8 @@ export const INDICATOR_DEFS = [
     overlay: true,
     defaultParams: { color: '#089981' },
     description: 'Displays entry and exit arrows from your active strategy',
-    category: 'trades'
+    category: 'trades',
+    allowMultiple: true  // Strategy indicators can have multiple instances
   },
   { 
     type: 'rsi', 
@@ -201,19 +202,20 @@ export const useChartStore = create(
           const def = INDICATOR_DEFS.find(d => d.type === type);
           if (!def) return null;
 
-          // Volume and Strategy are unique (only 1 instance allowed)
-          if (type === 'volume' || type === 'strategy') {
+          // Volume is unique (only 1 instance allowed)
+          // Strategy indicators now allow multiple instances via addOrUpdateStrategyIndicator
+          if (type === 'volume') {
             const existing = indicators.find(i => i.type === type);
             if (existing) {
               set({
-                indicators: indicators.map(i => 
+                indicators: indicators.map(i =>
                   i.type === type ? { ...i, visible: true } : i
                 )
               });
               return existing.id;
             }
           }
-          
+
           const newIndicator = {
             id: generateId(),
             type: def.type,
@@ -225,24 +227,72 @@ export const useChartStore = create(
           set((state) => {
             const newIndicators = [...state.indicators, newIndicator];
             const newPaneHeights = { ...state.paneHeights };
-            
+
             if (!newIndicator.overlay) {
               // Calculate default height for new pane
               const defaultHeight = 0.2;
               newPaneHeights[newIndicator.id] = defaultHeight;
-              
+
               // Adjust main pane height
               const currentMainHeight = newPaneHeights.main ?? 0.7;
               newPaneHeights.main = Math.max(0.3, currentMainHeight - defaultHeight);
             }
-            
-            return { 
+
+            return {
               indicators: newIndicators,
               paneHeights: newPaneHeights
             };
           });
-          
+
           return newIndicator.id;
+        },
+
+        // Special function to add or update strategy indicators
+        // Matches by code hash - same strategy logic = same indicator
+        addOrUpdateStrategyIndicator: ({ codeHash, strategyName, trades, symbol }) => {
+          const { indicators } = get();
+
+          // Find existing strategy with same code hash
+          const existingIdx = indicators.findIndex(
+            i => i.type === 'strategy' && i.codeHash === codeHash
+          );
+
+          if (existingIdx !== -1) {
+            // Update existing strategy indicator
+            set((state) => ({
+              indicators: state.indicators.map((ind, idx) =>
+                idx === existingIdx
+                  ? { ...ind, trades, symbol, visible: true }
+                  : ind
+              )
+            }));
+            return indicators[existingIdx].id;
+          } else {
+            // Create new strategy indicator
+            const newId = generateId();
+            const newIndicator = {
+              id: newId,
+              type: 'strategy',
+              overlay: true,
+              visible: true,
+              name: strategyName,
+              codeHash,
+              trades,
+              symbol,
+              params: { color: '#089981' }
+            };
+
+            set((state) => ({
+              indicators: [...state.indicators, newIndicator]
+            }));
+
+            return newId;
+          }
+        },
+
+        // Get all strategy indicators
+        getStrategyIndicators: () => {
+          return get().indicators.filter(i => i.type === 'strategy');
         },
         
         removeIndicator: (id) => {

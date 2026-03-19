@@ -133,6 +133,11 @@ export default function ChartContainer() {
   const simResults = useSimulatorStore((s) => s.results);
   const simMode = useSimulatorStore((s) => s.mode);
   const hasSimResults = !!(simResults && simResults.equity_curve && simResults.equity_curve.length > 0);
+
+  // Get all strategy indicators for trade markers
+  const strategyIndicators = useMemo(() => {
+    return (indicators || []).filter(i => i.type === 'strategy');
+  }, [indicators]);
   
   const [showSimPane, setShowSimPane] = useState(() => {
     return localStorage.getItem('optibiz_showSimPane') === 'true';
@@ -589,17 +594,28 @@ export default function ChartContainer() {
     chartStateRef.current = { symbol, barSize, duration, useRTH, indHash, firstBarTime, barsLength: displayBars.length, lastHistTime: lastHistoricalTimeRef.current };
   }, [displayBars, indicators, useRTH, symbol, barSize, duration, overlayIndicators]);
 
-  // --- TRADES/MARKERS LOGIC (DEPENDS ON STRATEGY INDICATOR VISIBILITY) ---
+  // --- TRADES/MARKERS LOGIC (RENDERS FROM ALL VISIBLE STRATEGY INDICATORS) ---
   useEffect(() => {
       if (!mainChartRef.current || !mainSeriesRef.current.has('candles')) return;
       const candleSeries = mainSeriesRef.current.get('candles');
 
-      const strategyInd = overlayIndicators.find(i => i.type === 'strategy');
-      const isVisible = strategyInd && strategyInd.visible !== false;
+      // Collect markers from all visible strategy indicators that match current symbol
+      const allMarkers = [];
 
-      if (simResults && simResults.trades && simMode === 'single' && isVisible && displayBars.length > 0) {
+      for (const stratInd of strategyIndicators) {
+          // Skip hidden strategies
+          if (stratInd.visible === false) continue;
+
+          // Skip strategies for different symbols
+          if (stratInd.symbol && stratInd.symbol.toUpperCase() !== symbol.toUpperCase()) continue;
+
+          // Skip if no trades data
+          if (!stratInd.trades || !Array.isArray(stratInd.trades) || stratInd.trades.length === 0) continue;
+
+          if (displayBars.length === 0) continue;
+
           const barTimes = displayBars.map(b => b.time);
-          
+
           // Snaps the marker time to the exact timestamp of the nearest available candle
           const getClosestTime = (targetTs) => {
               let closest = barTimes[0];
@@ -611,10 +627,10 @@ export default function ChartContainer() {
                       closest = barTimes[i];
                   }
               }
-              return minDiff < 86400 * 7 ? closest : targetTs; 
+              return minDiff < 86400 * 7 ? closest : targetTs;
           };
 
-          const rawMarkers = simResults.trades.map(t => {
+          const rawMarkers = stratInd.trades.map(t => {
               const isEntry = t.type !== 'Exit';
               return {
                   time: getClosestTime(t.time),
@@ -624,33 +640,31 @@ export default function ChartContainer() {
                   text: isEntry ? `${t.type} ${t.size}` : `Exit ${t.size} (${t.pnl > 0 ? '+' : ''}${t.pnl?.toFixed(2)})`
               };
           });
-          
-          const validMarkers = rawMarkers.filter(m => m.time != null && !isNaN(m.time));
-          validMarkers.sort((a, b) => a.time - b.time);
 
-          // Lightweight charts throws an error if multiple markers have the EXACT same timestamp.
-          // This deduplicates them and merges their text if they land on the same bar.
-          const uniqueMarkers = [];
-          const timeSet = new Set();
-          for (const m of validMarkers) {
-              if (!timeSet.has(m.time)) {
-                  uniqueMarkers.push(m);
-                  timeSet.add(m.time);
-              } else {
-                  const existing = uniqueMarkers.find(um => um.time === m.time);
-                  if (existing) existing.text += ` & ${m.text}`;
-              }
-          }
-          
-          if (typeof candleSeries.setMarkers === 'function') {
-              try { candleSeries.setMarkers(uniqueMarkers); } catch (e) {}
-          }
-      } else {
-          if (typeof candleSeries.setMarkers === 'function') {
-              try { candleSeries.setMarkers([]); } catch (e) {}
+          allMarkers.push(...rawMarkers);
+      }
+
+      // Remove invalid markers and sort by time
+      const validMarkers = allMarkers.filter(m => m.time != null && !isNaN(m.time));
+      validMarkers.sort((a, b) => a.time - b.time);
+
+      // Deduplicate markers with same timestamp (merge text)
+      const uniqueMarkers = [];
+      const timeSet = new Set();
+      for (const m of validMarkers) {
+          if (!timeSet.has(m.time)) {
+              uniqueMarkers.push(m);
+              timeSet.add(m.time);
+          } else {
+              const existing = uniqueMarkers.find(um => um.time === m.time);
+              if (existing) existing.text += ` & ${m.text}`;
           }
       }
-  }, [simResults, simMode, overlayIndicators, displayBars]);
+
+      if (typeof candleSeries.setMarkers === 'function') {
+          try { candleSeries.setMarkers(uniqueMarkers); } catch (e) {}
+      }
+  }, [strategyIndicators, displayBars, symbol]);
 
   useEffect(() => {
     if (!mainChartRef.current) return;

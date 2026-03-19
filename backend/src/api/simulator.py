@@ -4,6 +4,7 @@ import json
 import traceback
 import requests
 import math
+import hashlib
 import pandas as pd
 import yfinance as yf
 from fastapi import APIRouter, HTTPException
@@ -38,6 +39,19 @@ def safe_float(v):
         return round(val, 4)
     except:
         return 0.0
+
+def generate_code_hash(code: str) -> str:
+    """Generate a hash of strategy code for identifying the same strategy logic.
+    Normalizes code by removing comments, extra whitespace, and variable names to focus on logic."""
+    # Remove single-line comments
+    normalized = re.sub(r'#.*$', '', code, flags=re.MULTILINE)
+    # Remove docstrings
+    normalized = re.sub(r'""".*?"""', '', normalized, flags=re.DOTALL)
+    normalized = re.sub(r"'''.*?'''", '', normalized, flags=re.DOTALL)
+    # Remove extra whitespace and blank lines
+    normalized = '\n'.join(line.strip() for line in normalized.split('\n') if line.strip())
+    # Hash the normalized code
+    return hashlib.md5(normalized.encode()).hexdigest()[:12]
 
 def call_llm(provider: str, api_key: str, messages: List[Dict[str, str]]) -> str:
     try:
@@ -177,10 +191,11 @@ STEP 2 - PRESENT SUMMARY FOR APPROVAL:
 - Determine the TARGET SYMBOL for the backtest:
   * If the user mentioned a specific ticker (AAPL, INTC, TSLA, etc.), use that ticker
   * If no ticker mentioned, use the current chart symbol: {req.symbol}
+- Create a short, descriptive STRATEGY NAME based on the logic (e.g., "EMA 150 Crossover", "RSI Oversold Bounce", "Monthly DCA")
 - Present the strategy summary using this EXACT HTML format:
 
 {triple_ticks}json
-{{"symbol": "TARGET_SYMBOL", "startDate": "YYYY-MM-DD", "endDate": "YYYY-MM-DD", "initialCapital": CAPITAL_NUMBER}}
+{{"symbol": "TARGET_SYMBOL", "strategyName": "SHORT_DESCRIPTIVE_NAME", "startDate": "YYYY-MM-DD", "endDate": "YYYY-MM-DD", "initialCapital": CAPITAL_NUMBER}}
 {triple_ticks}
 
 <h3 style="margin: 0 0 10px 0; color: #d1d4dc;">Strategy Summary</h3>
@@ -487,6 +502,16 @@ def RSI(values, n):
 
         print(f"[SIMULATOR DEBUG] Backtest complete. Return: {stats.get('Return [%]', 0)}%")
 
+        # Generate code hash for strategy identification
+        code_hash = generate_code_hash(strategy_code)
+        print(f"[SIMULATOR DEBUG] Generated code hash: {code_hash}")
+
+        # Extract strategy name from param_update or generate default
+        strategy_name = "Custom Strategy"
+        if param_update and "strategyName" in param_update:
+            strategy_name = param_update["strategyName"]
+        print(f"[SIMULATOR DEBUG] Strategy name: {strategy_name}")
+
         # Always include symbol in param_update for frontend to change chart
         if not param_update:
             param_update = {}
@@ -496,6 +521,8 @@ def RSI(values, n):
             "status": "success",
             "message": "Strategy executed successfully.",
             "code": strategy_code,
+            "code_hash": code_hash,
+            "strategy_name": strategy_name,
             "param_update": param_update,
             "results": {
                 "symbol": req.symbol,

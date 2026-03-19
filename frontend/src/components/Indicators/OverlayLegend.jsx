@@ -12,7 +12,7 @@ function IndicatorLegendRow({ ind }) {
   const getIndicatorLabel = () => {
     const def = INDICATOR_DEFS.find(d => d.type === ind.type);
     const params = ind.params || {};
-    
+
     switch (ind.type) {
       case 'sma':
       case 'ema':
@@ -22,13 +22,18 @@ function IndicatorLegendRow({ ind }) {
       case 'vwap':
         return 'VWAP';
       case 'strategy':
-        return 'Strategy Trades';
+        // Use the LLM-generated strategy name if available
+        return ind.name || 'Strategy Trades';
       default:
         return def?.name || ind.type;
     }
   };
 
   const getIndicatorColor = () => {
+    // Strategy indicators use green to match entry arrows
+    if (ind.type === 'strategy') {
+      return '#089981';
+    }
     return ind.params?.color || '#2962FF';
   };
 
