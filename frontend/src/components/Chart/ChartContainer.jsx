@@ -692,6 +692,7 @@ export default function ChartContainer() {
           console.log('[MARKERS DEBUG] - visible:', stratInd.visible);
           console.log('[MARKERS DEBUG] - stratInd.symbol:', stratInd.symbol);
           console.log('[MARKERS DEBUG] - trades count:', stratInd.trades?.length);
+          console.log('[MARKERS DEBUG] - trades data:', stratInd.trades?.slice(0, 5)); // Log first 5 trades
 
           // Skip hidden strategies
           if (stratInd.visible === false) {

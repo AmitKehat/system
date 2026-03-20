@@ -621,6 +621,13 @@ def RSI(values, n):
             })
 
         print(f"[SIMULATOR DEBUG] Backtest complete. Return: {stats.get('Return [%]', 0)}%")
+        print(f"[SIMULATOR DEBUG] Total trades in trades_df: {len(trades_df)}")
+        print(f"[SIMULATOR DEBUG] Trade markers created: {len(trade_markers)}")
+
+        # Debug: print first few trades if any
+        if len(trades_df) > 0:
+            for idx, row in trades_df.head(3).iterrows():
+                print(f"[SIMULATOR DEBUG] Trade {idx}: Entry={row['EntryTime']}, Exit={row['ExitTime']}, Size={row['Size']}, PnL={row['PnL']}")
 
         # Generate code hash for strategy identification
         code_hash = generate_code_hash(strategy_code)
