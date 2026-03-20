@@ -106,6 +106,31 @@ def extract_indicators_from_code(code: str) -> List[Dict]:
 
     return indicators
 
+
+def get_max_indicator_period(indicators: List[Dict], code: str) -> int:
+    """
+    Get the maximum indicator period from the indicators list and code.
+    This is used to determine how much warmup data to fetch.
+    """
+    max_period = 0
+
+    # Check indicators list
+    for ind in indicators:
+        period = ind.get("period", 0)
+        if period > max_period:
+            max_period = period
+
+    # Also scan code for any numeric periods we might have missed
+    # Look for patterns like SMA(..., 150), EMA(..., 200), etc.
+    period_pattern = r'\b(?:SMA|EMA|RSI|MACD|ATR|ADX|CCI|BB)\s*\([^)]*,\s*(\d+)'
+    for match in re.finditer(period_pattern, code, re.IGNORECASE):
+        period = int(match.group(1))
+        if period > max_period:
+            max_period = period
+
+    return max_period
+
+
 def call_llm(provider: str, api_key: str, messages: List[Dict[str, str]]) -> str:
     try:
         if provider == "openai":
@@ -456,6 +481,15 @@ CRITICAL RULES:
     # We have code - run the backtest!
     print(f"[SIMULATOR DEBUG] Running backtest for symbol: {req.symbol}")
 
+    # Extract indicators from code to determine warmup period
+    code_indicators = extract_indicators_from_code(strategy_code)
+    llm_indicators = []
+    if param_update and "indicators" in param_update:
+        llm_indicators = param_update["indicators"]
+    all_indicators = llm_indicators + code_indicators
+    max_period = get_max_indicator_period(all_indicators, strategy_code)
+    print(f"[SIMULATOR DEBUG] Max indicator period detected: {max_period}")
+
     try:
         start_date = req.parameters.get("startDate", "2023-01-01")
         if param_update and "startDate" in param_update:
@@ -465,9 +499,20 @@ CRITICAL RULES:
         if param_update and "endDate" in param_update:
             end_date = param_update["endDate"]
 
-        print(f"[SIMULATOR DEBUG] Downloading data for {req.symbol} from {start_date} to {end_date}")
-        df = yf.download(req.symbol, start=start_date, end=end_date, progress=False)
-        print(f"[SIMULATOR DEBUG] Downloaded {len(df)} rows")
+        # Calculate warmup start date - need extra data for indicator calculation
+        # Trading days ≈ 252/year, so we need max_period * 1.5 calendar days to be safe
+        # Add buffer of 50 extra days for safety
+        warmup_days = int(max_period * 1.5) + 50 if max_period > 0 else 0
+
+        actual_start_date = datetime.strptime(start_date, '%Y-%m-%d')
+        warmup_start_date = actual_start_date - pd.Timedelta(days=warmup_days)
+        warmup_start_str = warmup_start_date.strftime('%Y-%m-%d')
+
+        print(f"[SIMULATOR DEBUG] Requested date range: {start_date} to {end_date}")
+        print(f"[SIMULATOR DEBUG] Warmup period: {warmup_days} days, fetching from: {warmup_start_str}")
+
+        df = yf.download(req.symbol, start=warmup_start_str, end=end_date, progress=False)
+        print(f"[SIMULATOR DEBUG] Downloaded {len(df)} rows (including warmup)")
 
         if df.empty:
             raise ValueError(f"No data fetched for {req.symbol}")
@@ -521,6 +566,15 @@ def RSI(values, n):
         stats = bt.run()
 
         trades_df = stats['_trades']
+
+        # Filter trades to only include those within the requested date range
+        # (exclude warmup period trades)
+        if not trades_df.empty and warmup_days > 0:
+            actual_start_dt = pd.Timestamp(actual_start_date)
+            original_count = len(trades_df)
+            trades_df = trades_df[trades_df['EntryTime'] >= actual_start_dt]
+            print(f"[SIMULATOR DEBUG] Filtered trades: {original_count} -> {len(trades_df)} (removed warmup period trades)")
+
         if trades_df.empty:
             return {
                 "status": "error",
@@ -534,6 +588,9 @@ def RSI(values, n):
 
         if '_equity_curve' in stats and not stats['_equity_curve'].empty:
             eq_df = stats['_equity_curve']
+            # Filter equity curve to actual start date (exclude warmup)
+            if warmup_days > 0:
+                eq_df = eq_df[eq_df.index >= actual_start_date]
             for dt, row in eq_df.iterrows():
                 date_str = dt.strftime('%Y-%m-%d')
                 equity_data.append({"time": date_str, "value": safe_float(row['Equity'])})
