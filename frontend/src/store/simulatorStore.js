@@ -61,16 +61,46 @@ export const useSimulatorStore = create(
               console.log(`[SIMULATOR] Results symbol: ${data.results?.symbol}, Equity curve length: ${data.results?.equity_curve?.length}`);
               console.log(`[SIMULATOR] Code hash: ${data.code_hash}, Strategy name: ${data.strategy_name}`);
 
-              // Backtest completed - ALWAYS sync chart to backtest symbol
+              // Backtest completed - sync chart to backtest symbol AND timeframe
               const backtestSymbol = data.results?.symbol || data.param_update?.symbol;
+              const chartStore = useChartStore.getState();
+
+              // Calculate duration needed to show full backtest period
+              const startDate = data.param_update?.startDate || parameters.startDate;
+              const endDate = data.param_update?.endDate || parameters.endDate;
+              const start = new Date(startDate);
+              const end = new Date(endDate);
+              const daysDiff = Math.ceil((end - start) / (1000 * 60 * 60 * 24));
+
+              // Choose appropriate duration for the backtest period
+              let targetDuration = '1 Y';
+              if (daysDiff <= 7) targetDuration = '1 W';
+              else if (daysDiff <= 30) targetDuration = '1 M';
+              else if (daysDiff <= 90) targetDuration = '3 M';
+              else if (daysDiff <= 180) targetDuration = '6 M';
+              else if (daysDiff <= 365) targetDuration = '1 Y';
+              else if (daysDiff <= 730) targetDuration = '2 Y';
+              else targetDuration = '5 Y';
+
+              console.log(`[SIMULATOR] Backtest period: ${startDate} to ${endDate} (${daysDiff} days) -> duration: ${targetDuration}`);
+
+              // Switch chart to daily bars and appropriate duration for backtest view
+              const needsUpdate = chartStore.barSize !== '1 day' || chartStore.duration !== targetDuration;
+              if (needsUpdate) {
+                  console.log(`[SIMULATOR] Switching chart to daily bars with ${targetDuration} duration`);
+                  chartStore.setBarSize('1 day');
+                  chartStore.setDuration(targetDuration);
+              }
+
               if (backtestSymbol) {
-                  const currentSymbol = useChartStore.getState().symbol;
+                  const currentSymbol = chartStore.symbol;
                   console.log(`[SIMULATOR] Backtest symbol: ${backtestSymbol}, Current chart: ${currentSymbol}`);
                   if (backtestSymbol.toUpperCase() !== currentSymbol.toUpperCase()) {
                       console.log(`[SIMULATOR] Calling setSymbol to change chart from ${currentSymbol} to ${backtestSymbol}`);
-                      useChartStore.getState().setSymbol(backtestSymbol);
-                  } else {
-                      console.log(`[SIMULATOR] Chart already on correct symbol, NOT calling setSymbol`);
+                      chartStore.setSymbol(backtestSymbol);
+                  } else if (needsUpdate) {
+                      // Same symbol but different timeframe - trigger reload
+                      chartStore.reloadChart();
                   }
               } else {
                   console.log(`[SIMULATOR] WARNING: No symbol in results or param_update!`, data);
@@ -99,14 +129,22 @@ export const useSimulatorStore = create(
               });
 
               // --- Register strategy indicator using the new hash-based system ---
-              const chartStore = useChartStore.getState();
-              chartStore.addOrUpdateStrategyIndicator({
+              console.log('[SIMULATOR] About to call addOrUpdateStrategyIndicator with:');
+              console.log('[SIMULATOR] - codeHash:', data.code_hash);
+              console.log('[SIMULATOR] - strategyName:', data.strategy_name);
+              console.log('[SIMULATOR] - trades count:', data.results.trades?.length);
+              console.log('[SIMULATOR] - symbol:', backtestSymbol);
+              console.log('[SIMULATOR] - strategy_indicators:', data.strategy_indicators);
+
+              const indicatorId = chartStore.addOrUpdateStrategyIndicator({
                   codeHash: data.code_hash,
                   strategyName: data.strategy_name || 'Custom Strategy',
                   trades: data.results.trades,
-                  symbol: backtestSymbol
+                  symbol: backtestSymbol,
+                  strategyIndicators: data.strategy_indicators || []
               });
-              console.log(`[SIMULATOR] Strategy indicator registered with hash: ${data.code_hash}`);
+              console.log('[SIMULATOR] Strategy indicator registered with id:', indicatorId);
+              console.log('[SIMULATOR] Current indicators:', chartStore.indicators.filter(i => i.type === 'strategy'));
           } else if (data.status === 'chat_reply') {
               // Conversation continues - do NOT change the chart yet
               // Store the assistant's message (which includes the summary)

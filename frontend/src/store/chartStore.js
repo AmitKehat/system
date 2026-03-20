@@ -249,29 +249,61 @@ export const useChartStore = create(
 
         // Special function to add or update strategy indicators
         // Matches by code hash - same strategy logic = same indicator
-        addOrUpdateStrategyIndicator: ({ codeHash, strategyName, trades, symbol }) => {
-          const { indicators } = get();
+        addOrUpdateStrategyIndicator: ({ codeHash, strategyName, trades, symbol, strategyIndicators = [] }) => {
+          const { indicators, addIndicator } = get();
+
+          // Default colors for strategy overlay indicators
+          const defaultColors = {
+            ema: '#2962FF',
+            sma: '#FF6D00',
+            bb: '#7B1FA2',
+            vwap: '#00BCD4',
+            rsi: '#7B1FA2',
+            macd: '#00BCD4'
+          };
+
+          // Separate overlay vs non-overlay indicators
+          const overlayInds = strategyIndicators.filter(i => i.overlay);
+          const nonOverlayInds = strategyIndicators.filter(i => !i.overlay);
+
+          // Format overlay indicators for storage in strategy
+          const formattedOverlayInds = overlayInds.map(ind => ({
+            type: ind.type,
+            params: {
+              period: ind.period,
+              color: defaultColors[ind.type] || '#2962FF'
+            }
+          }));
 
           // Find existing strategy with same code hash
           const existingIdx = indicators.findIndex(
             i => i.type === 'strategy' && i.codeHash === codeHash
           );
 
+          let strategyId;
+
           if (existingIdx !== -1) {
             // Update existing strategy indicator
+            const existingStrategy = indicators[existingIdx];
+            strategyId = existingStrategy.id;
+
+            // Remove old linked indicators before updating
+            const oldLinkedIds = existingStrategy.linkedIndicatorIds || [];
+
             set((state) => ({
-              indicators: state.indicators.map((ind, idx) =>
-                idx === existingIdx
-                  ? { ...ind, trades, symbol, visible: true }
-                  : ind
-              )
+              indicators: state.indicators
+                .filter(ind => !oldLinkedIds.includes(ind.id))  // Remove old linked
+                .map((ind, idx) =>
+                  ind.id === strategyId
+                    ? { ...ind, trades, symbol, visible: true, overlayIndicators: formattedOverlayInds, linkedIndicatorIds: [] }
+                    : ind
+                )
             }));
-            return indicators[existingIdx].id;
           } else {
             // Create new strategy indicator
-            const newId = generateId();
+            strategyId = generateId();
             const newIndicator = {
-              id: newId,
+              id: strategyId,
               type: 'strategy',
               overlay: true,
               visible: true,
@@ -279,35 +311,91 @@ export const useChartStore = create(
               codeHash,
               trades,
               symbol,
+              overlayIndicators: formattedOverlayInds,
+              linkedIndicatorIds: [],
               params: { color: '#089981' }
             };
 
             set((state) => ({
               indicators: [...state.indicators, newIndicator]
             }));
-
-            return newId;
           }
+
+          // Create linked indicators for non-overlay indicators
+          const linkedIds = [];
+          for (const ind of nonOverlayInds) {
+            const def = INDICATOR_DEFS.find(d => d.type === ind.type);
+            if (!def) continue;
+
+            const linkedId = generateId();
+            linkedIds.push(linkedId);
+
+            const linkedIndicator = {
+              id: linkedId,
+              type: ind.type,
+              overlay: false,
+              visible: true,
+              linkedToStrategyId: strategyId,
+              params: {
+                ...def.defaultParams,
+                period: ind.period,
+                color: defaultColors[ind.type] || def.defaultParams?.color || '#2962FF'
+              }
+            };
+
+            set((state) => {
+              const newPaneHeights = { ...state.paneHeights };
+              newPaneHeights[linkedId] = 150;
+              return {
+                indicators: [...state.indicators, linkedIndicator],
+                paneHeights: newPaneHeights
+              };
+            });
+          }
+
+          // Update strategy with linked indicator IDs
+          if (linkedIds.length > 0) {
+            set((state) => ({
+              indicators: state.indicators.map(ind =>
+                ind.id === strategyId
+                  ? { ...ind, linkedIndicatorIds: linkedIds }
+                  : ind
+              )
+            }));
+          }
+
+          return strategyId;
         },
 
         // Get all strategy indicators
         getStrategyIndicators: () => {
           return get().indicators.filter(i => i.type === 'strategy');
         },
-        
+
         removeIndicator: (id) => {
           set((state) => {
             const ind = state.indicators.find(i => i.id === id);
-            const newIndicators = state.indicators.filter(i => i.id !== id);
-            const newPaneHeights = { ...state.paneHeights };
-            
-            // If removing a non-overlay, redistribute its height to main
-            if (ind && !ind.overlay) {
-              const removedHeight = newPaneHeights[id] ?? 0.2;
-              delete newPaneHeights[id];
-              newPaneHeights.main = (newPaneHeights.main ?? 0.7) + removedHeight;
+            if (!ind) return state;
+
+            // Collect IDs to remove (the indicator + any linked indicators if it's a strategy)
+            let idsToRemove = [id];
+            if (ind.type === 'strategy' && ind.linkedIndicatorIds) {
+              idsToRemove = [...idsToRemove, ...ind.linkedIndicatorIds];
             }
-            
+
+            const newIndicators = state.indicators.filter(i => !idsToRemove.includes(i.id));
+            const newPaneHeights = { ...state.paneHeights };
+
+            // Clean up pane heights for all removed indicators
+            for (const removeId of idsToRemove) {
+              const removedInd = state.indicators.find(i => i.id === removeId);
+              if (removedInd && !removedInd.overlay) {
+                const removedHeight = newPaneHeights[removeId] ?? 0.2;
+                delete newPaneHeights[removeId];
+                newPaneHeights.main = (newPaneHeights.main ?? 0.7) + removedHeight;
+              }
+            }
+
             return {
               indicators: newIndicators,
               paneHeights: newPaneHeights,
@@ -391,7 +479,22 @@ export const useChartStore = create(
           indicators: state.indicators,
           favorites: state.favorites,
           paneHeights: state.paneHeights
-        })
+        }),
+        // Clean up invalid strategy indicators on rehydration
+        onRehydrateStorage: () => (state) => {
+          if (state?.indicators) {
+            const validIndicators = state.indicators.filter(ind => {
+              // Keep non-strategy indicators
+              if (ind.type !== 'strategy') return true;
+              // For strategy indicators, require valid trades array
+              return ind.trades && Array.isArray(ind.trades) && ind.trades.length > 0;
+            });
+            if (validIndicators.length !== state.indicators.length) {
+              console.log('[CHART STORE] Cleaned up invalid strategy indicators');
+              state.indicators = validIndicators;
+            }
+          }
+        }
       }
     )
   )

@@ -1,5 +1,5 @@
 // src/components/Chart/ChartContainer.jsx
-import { createChart, CandlestickSeries, LineSeries, HistogramSeries } from 'lightweight-charts';
+import { createChart, CandlestickSeries, LineSeries, HistogramSeries, createSeriesMarkers } from 'lightweight-charts';
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useChartStore, INDICATOR_DEFS } from '../../store/chartStore';
 import { useStatusStore } from '../../store/statusStore';
@@ -170,6 +170,7 @@ export default function ChartContainer() {
   const mainContainerRef = useRef(null);
   const mainChartRef = useRef(null);
   const mainSeriesRef = useRef(new Map());
+  const markersPluginRef = useRef(null);  // v5 markers plugin
   const indicatorChartsRef = useRef(new Map());
   const isSyncingRef = useRef(false);
   
@@ -432,6 +433,7 @@ export default function ChartContainer() {
       mainChartRef.current = null;
       mainSeriesRef.current.clear();
       mainPriceLineRef.current.clear();
+      markersPluginRef.current = null;
       setMainChartReady(false);
     };
   }, []);
@@ -472,6 +474,10 @@ export default function ChartContainer() {
         upColor: '#089981', downColor: '#f23645', borderVisible: false, wickUpColor: '#089981', wickDownColor: '#f23645', lastValueVisible: false
       });
       mainSeriesRef.current.set('candles', series);
+
+      // Create v5 markers plugin for this series
+      markersPluginRef.current = createSeriesMarkers(series, []);
+      console.log('[MARKERS] Created markers plugin for candles series');
     }
 
     // EXPLICITLY CLEAR THE CHART IF THERE IS NO DATA YET
@@ -486,7 +492,10 @@ export default function ChartContainer() {
                 mainSeriesRef.current.get(ind.id).setData([]);
             }
         });
-        try { mainSeriesRef.current.get('candles').setMarkers([]); } catch(e) {}
+        // Clear markers using v5 plugin API
+        if (markersPluginRef.current) {
+            try { markersPluginRef.current.setMarkers([]); } catch(e) {}
+        }
         chartStateRef.current.barsLength = 0;
         return;
     }
@@ -594,30 +603,139 @@ export default function ChartContainer() {
     chartStateRef.current = { symbol, barSize, duration, useRTH, indHash, firstBarTime, barsLength: displayBars.length, lastHistTime: lastHistoricalTimeRef.current };
   }, [displayBars, indicators, useRTH, symbol, barSize, duration, overlayIndicators]);
 
+  // --- STRATEGY OVERLAY INDICATORS (EMA, SMA, etc. from strategies) ---
+  useEffect(() => {
+    if (!mainChartRef.current || !displayBars || displayBars.length === 0) return;
+
+    const chart = mainChartRef.current;
+    const closes = displayBars.map((b) => b.close);
+    const highs = displayBars.map((b) => b.high);
+    const lows = displayBars.map((b) => b.low);
+    const volumes = displayBars.map((b) => b.volume);
+    const times = displayBars.map((b) => b.time);
+
+    // Collect all active strategy overlay series keys
+    const activeStrategyOverlayKeys = new Set();
+
+    // Render overlay indicators from each visible strategy
+    for (const stratInd of strategyIndicators) {
+      // Skip hidden strategies or strategies for different symbols
+      if (stratInd.visible === false) continue;
+      if (stratInd.symbol && stratInd.symbol.toUpperCase() !== symbol.toUpperCase()) continue;
+      if (!stratInd.overlayIndicators || stratInd.overlayIndicators.length === 0) continue;
+
+      for (const ovInd of stratInd.overlayIndicators) {
+        const seriesKey = `strategy-${stratInd.id}-${ovInd.type}-${ovInd.params?.period || 0}`;
+        activeStrategyOverlayKeys.add(seriesKey);
+
+        const color = ovInd.params?.color || '#2962FF';
+        const result = calculateIndicator(ovInd.type, { closes, highs, lows, volumes, times }, ovInd.params);
+
+        if (result && result.data) {
+          if (!mainSeriesRef.current.has(seriesKey)) {
+            const series = chart.addSeries(LineSeries, {
+              color: color,
+              lineWidth: 2,
+              priceLineVisible: false,
+              lastValueVisible: false
+            });
+            mainSeriesRef.current.set(seriesKey, series);
+            console.log(`[STRATEGY OVERLAY] Created series for ${seriesKey}`);
+          }
+          mainSeriesRef.current.get(seriesKey).setData(result.data);
+          mainSeriesRef.current.get(seriesKey).applyOptions({ visible: true, color });
+        }
+      }
+    }
+
+    // Remove stale strategy overlay series
+    for (const [key, series] of mainSeriesRef.current.entries()) {
+      if (key.startsWith('strategy-') && !activeStrategyOverlayKeys.has(key)) {
+        try { chart.removeSeries(series); } catch (e) {}
+        mainSeriesRef.current.delete(key);
+        console.log(`[STRATEGY OVERLAY] Removed stale series: ${key}`);
+      }
+    }
+  }, [strategyIndicators, displayBars, symbol]);
+
   // --- TRADES/MARKERS LOGIC (RENDERS FROM ALL VISIBLE STRATEGY INDICATORS) ---
   useEffect(() => {
-      if (!mainChartRef.current || !mainSeriesRef.current.has('candles')) return;
+      console.log('[MARKERS DEBUG] useEffect triggered');
+      console.log('[MARKERS DEBUG] strategyIndicators:', strategyIndicators);
+      console.log('[MARKERS DEBUG] displayBars.length:', displayBars.length);
+      console.log('[MARKERS DEBUG] current symbol:', symbol);
+      console.log('[MARKERS DEBUG] barSize:', barSize);
+
+      if (!mainChartRef.current || !mainSeriesRef.current.has('candles')) {
+          console.log('[MARKERS DEBUG] No chart or candles series yet');
+          return;
+      }
       const candleSeries = mainSeriesRef.current.get('candles');
+
+      // Log chart bar time range
+      if (displayBars.length > 0) {
+          const firstBarTime = displayBars[0].time;
+          const lastBarTime = displayBars[displayBars.length - 1].time;
+          console.log('[MARKERS DEBUG] Chart bar range:', {
+              first: firstBarTime,
+              firstDate: new Date(firstBarTime * 1000).toISOString(),
+              last: lastBarTime,
+              lastDate: new Date(lastBarTime * 1000).toISOString()
+          });
+      }
 
       // Collect markers from all visible strategy indicators that match current symbol
       const allMarkers = [];
 
       for (const stratInd of strategyIndicators) {
+          console.log('[MARKERS DEBUG] Processing strategy:', stratInd.id, stratInd.name);
+          console.log('[MARKERS DEBUG] - visible:', stratInd.visible);
+          console.log('[MARKERS DEBUG] - stratInd.symbol:', stratInd.symbol);
+          console.log('[MARKERS DEBUG] - trades count:', stratInd.trades?.length);
+
           // Skip hidden strategies
-          if (stratInd.visible === false) continue;
+          if (stratInd.visible === false) {
+              console.log('[MARKERS DEBUG] - SKIPPED: hidden');
+              continue;
+          }
 
           // Skip strategies for different symbols
-          if (stratInd.symbol && stratInd.symbol.toUpperCase() !== symbol.toUpperCase()) continue;
+          if (stratInd.symbol && stratInd.symbol.toUpperCase() !== symbol.toUpperCase()) {
+              console.log('[MARKERS DEBUG] - SKIPPED: symbol mismatch');
+              continue;
+          }
 
           // Skip if no trades data
-          if (!stratInd.trades || !Array.isArray(stratInd.trades) || stratInd.trades.length === 0) continue;
+          if (!stratInd.trades || !Array.isArray(stratInd.trades) || stratInd.trades.length === 0) {
+              console.log('[MARKERS DEBUG] - SKIPPED: no trades');
+              continue;
+          }
 
-          if (displayBars.length === 0) continue;
+          if (displayBars.length === 0) {
+              console.log('[MARKERS DEBUG] - SKIPPED: no display bars');
+              continue;
+          }
+
+          // Log first trade time vs chart range
+          if (stratInd.trades.length > 0) {
+              const firstTrade = stratInd.trades[0];
+              console.log('[MARKERS DEBUG] First trade:', {
+                  time: firstTrade.time,
+                  date: new Date(firstTrade.time * 1000).toISOString(),
+                  type: firstTrade.type
+              });
+          }
 
           const barTimes = displayBars.map(b => b.time);
+          const barTimeSet = new Set(barTimes);
 
           // Snaps the marker time to the exact timestamp of the nearest available candle
           const getClosestTime = (targetTs) => {
+              // First check if exact match exists
+              if (barTimeSet.has(targetTs)) {
+                  return targetTs;
+              }
+
               let closest = barTimes[0];
               let minDiff = Math.abs(targetTs - closest);
               for (let i = 1; i < barTimes.length; i++) {
@@ -627,20 +745,38 @@ export default function ChartContainer() {
                       closest = barTimes[i];
                   }
               }
-              return minDiff < 86400 * 7 ? closest : targetTs;
+              // Allow snapping within 7 days
+              const snapped = minDiff < 86400 * 7 ? closest : null;
+              if (!snapped) {
+                  console.log('[MARKERS DEBUG] Trade time too far from any bar:', {
+                      tradeTime: targetTs,
+                      tradeDate: new Date(targetTs * 1000).toISOString(),
+                      closestBar: closest,
+                      closestDate: new Date(closest * 1000).toISOString(),
+                      diffDays: (minDiff / 86400).toFixed(1)
+                  });
+              }
+              return snapped;
           };
 
           const rawMarkers = stratInd.trades.map(t => {
+              const snappedTime = getClosestTime(t.time);
+              if (snappedTime === null) return null; // Skip trades outside chart range
+
               const isEntry = t.type !== 'Exit';
               return {
-                  time: getClosestTime(t.time),
+                  time: snappedTime,
                   position: isEntry ? 'belowBar' : 'aboveBar',
                   color: isEntry ? '#089981' : '#f23645',
                   shape: isEntry ? 'arrowUp' : 'arrowDown',
                   text: isEntry ? `${t.type} ${t.size}` : `Exit ${t.size} (${t.pnl > 0 ? '+' : ''}${t.pnl?.toFixed(2)})`
               };
-          });
+          }).filter(m => m !== null);
 
+          console.log('[MARKERS DEBUG] - Adding', rawMarkers.length, 'markers from this strategy (after filtering)');
+          if (rawMarkers.length > 0) {
+              console.log('[MARKERS DEBUG] - First marker after snap:', rawMarkers[0]);
+          }
           allMarkers.push(...rawMarkers);
       }
 
@@ -661,10 +797,24 @@ export default function ChartContainer() {
           }
       }
 
-      if (typeof candleSeries.setMarkers === 'function') {
-          try { candleSeries.setMarkers(uniqueMarkers); } catch (e) {}
+      console.log('[MARKERS DEBUG] Final uniqueMarkers count:', uniqueMarkers.length);
+      if (uniqueMarkers.length > 0) {
+          console.log('[MARKERS DEBUG] First final marker:', uniqueMarkers[0]);
+          console.log('[MARKERS DEBUG] Last final marker:', uniqueMarkers[uniqueMarkers.length - 1]);
       }
-  }, [strategyIndicators, displayBars, symbol]);
+
+      // Use v5 markers plugin API
+      if (markersPluginRef.current) {
+          try {
+              markersPluginRef.current.setMarkers(uniqueMarkers);
+              console.log('[MARKERS DEBUG] v5 plugin setMarkers called successfully with', uniqueMarkers.length, 'markers');
+          } catch (e) {
+              console.log('[MARKERS DEBUG] v5 plugin setMarkers error:', e);
+          }
+      } else {
+          console.log('[MARKERS DEBUG] WARNING: markersPluginRef.current is null - plugin not initialized yet');
+      }
+  }, [strategyIndicators, displayBars, symbol, barSize]);
 
   useEffect(() => {
     if (!mainChartRef.current) return;

@@ -53,6 +53,59 @@ def generate_code_hash(code: str) -> str:
     # Hash the normalized code
     return hashlib.md5(normalized.encode()).hexdigest()[:12]
 
+# Indicator type to overlay status mapping
+INDICATOR_OVERLAY_MAP = {
+    "sma": True,
+    "ema": True,
+    "bb": True,
+    "vwap": True,
+    "rsi": False,
+    "macd": False,
+    "stoch": False,
+    "atr": False,
+    "adx": False,
+    "cci": False,
+    "obv": False,
+}
+
+def extract_indicators_from_code(code: str) -> List[Dict]:
+    """
+    Parse strategy code to find indicator calls and extract their parameters.
+    Returns a list of indicator definitions with type, period, and overlay status.
+    """
+    indicators = []
+    seen = set()  # Track unique indicators to avoid duplicates
+
+    # Pattern for SMA/EMA/RSI with period parameter: SMA(anything, 20) or EMA(x, 150)
+    simple_pattern = r'\b(SMA|EMA|RSI)\s*\([^,]+,\s*(\d+)\)'
+    for match in re.finditer(simple_pattern, code, re.IGNORECASE):
+        ind_type = match.group(1).lower()
+        period = int(match.group(2))
+        key = f"{ind_type}_{period}"
+        if key not in seen:
+            seen.add(key)
+            indicators.append({
+                "type": ind_type,
+                "period": period,
+                "overlay": INDICATOR_OVERLAY_MAP.get(ind_type, True)
+            })
+
+    # Pattern for self.I() calls: self.I(SMA, self.data.Close, 20)
+    self_i_pattern = r'self\.I\s*\(\s*(SMA|EMA|RSI)\s*,[^,]+,\s*(\d+)\)'
+    for match in re.finditer(self_i_pattern, code, re.IGNORECASE):
+        ind_type = match.group(1).lower()
+        period = int(match.group(2))
+        key = f"{ind_type}_{period}"
+        if key not in seen:
+            seen.add(key)
+            indicators.append({
+                "type": ind_type,
+                "period": period,
+                "overlay": INDICATOR_OVERLAY_MAP.get(ind_type, True)
+            })
+
+    return indicators
+
 def call_llm(provider: str, api_key: str, messages: List[Dict[str, str]]) -> str:
     try:
         if provider == "openai":
@@ -195,7 +248,7 @@ STEP 2 - PRESENT SUMMARY FOR APPROVAL:
 - Present the strategy summary using this EXACT HTML format:
 
 {triple_ticks}json
-{{"symbol": "TARGET_SYMBOL", "strategyName": "SHORT_DESCRIPTIVE_NAME", "startDate": "YYYY-MM-DD", "endDate": "YYYY-MM-DD", "initialCapital": CAPITAL_NUMBER}}
+{{"symbol": "TARGET_SYMBOL", "strategyName": "SHORT_DESCRIPTIVE_NAME", "startDate": "YYYY-MM-DD", "endDate": "YYYY-MM-DD", "initialCapital": CAPITAL_NUMBER, "indicators": [{{"type": "ema", "period": 150}}, {{"type": "rsi", "period": 14}}]}}
 {triple_ticks}
 
 <h3 style="margin: 0 0 10px 0; color: #d1d4dc;">Strategy Summary</h3>
@@ -246,7 +299,17 @@ CRITICAL RULES:
    - Handle weekends with range checks: if 1 <= current_dt.day <= 3 (not if current_dt.day == 2)
    - For monthly recurring: track state with (year, month) tuples
 
-5. MONTHLY STRATEGY EXAMPLE:
+5. INDICATOR LISTING:
+   - In the JSON block, list ALL technical indicators your strategy uses
+   - Format: "indicators": [{{"type": "indicator_name", "period": number}}]
+   - Supported types: "sma", "ema", "rsi", "macd", "bb" (bollinger bands)
+   - Examples:
+     * EMA crossover: "indicators": [{{"type": "ema", "period": 50}}, {{"type": "ema", "period": 200}}]
+     * RSI strategy: "indicators": [{{"type": "rsi", "period": 14}}]
+     * No indicators (price-only): "indicators": []
+   - These indicators will be automatically displayed on the chart
+
+6. MONTHLY STRATEGY EXAMPLE:
    ```python
    class CustomStrategy(Strategy):
        def init(self):
@@ -512,6 +575,35 @@ def RSI(values, n):
             strategy_name = param_update["strategyName"]
         print(f"[SIMULATOR DEBUG] Strategy name: {strategy_name}")
 
+        # Extract indicators - combine LLM-provided and code-extracted
+        llm_indicators = []
+        if param_update and "indicators" in param_update:
+            for ind in param_update["indicators"]:
+                ind_type = ind.get("type", "").lower()
+                period = ind.get("period", 0)
+                if ind_type and period:
+                    llm_indicators.append({
+                        "type": ind_type,
+                        "period": period,
+                        "overlay": INDICATOR_OVERLAY_MAP.get(ind_type, True)
+                    })
+
+        # Extract indicators from code as validation/fallback
+        code_indicators = extract_indicators_from_code(strategy_code)
+        print(f"[SIMULATOR DEBUG] LLM indicators: {llm_indicators}")
+        print(f"[SIMULATOR DEBUG] Code indicators: {code_indicators}")
+
+        # Use LLM indicators if provided, otherwise use code-extracted
+        # Merge: add any code-extracted indicators not in LLM list
+        strategy_indicators = llm_indicators.copy()
+        llm_keys = {f"{i['type']}_{i['period']}" for i in llm_indicators}
+        for ind in code_indicators:
+            key = f"{ind['type']}_{ind['period']}"
+            if key not in llm_keys:
+                strategy_indicators.append(ind)
+
+        print(f"[SIMULATOR DEBUG] Final strategy_indicators: {strategy_indicators}")
+
         # Always include symbol in param_update for frontend to change chart
         if not param_update:
             param_update = {}
@@ -523,6 +615,7 @@ def RSI(values, n):
             "code": strategy_code,
             "code_hash": code_hash,
             "strategy_name": strategy_name,
+            "strategy_indicators": strategy_indicators,
             "param_update": param_update,
             "results": {
                 "symbol": req.symbol,
