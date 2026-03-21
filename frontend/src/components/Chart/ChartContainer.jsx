@@ -766,12 +766,16 @@ export default function ChartContainer() {
               if (snappedTime === null) return null; // Skip trades outside chart range
 
               const isEntry = t.type !== 'Exit';
+              const isOpenPosition = t.open === true;
+
               return {
                   time: snappedTime,
                   position: isEntry ? 'belowBar' : 'aboveBar',
-                  color: isEntry ? '#089981' : '#f23645',
+                  color: isOpenPosition ? '#ff9800' : (isEntry ? '#089981' : '#f23645'), // Orange for open positions
                   shape: isEntry ? 'arrowUp' : 'arrowDown',
-                  text: isEntry ? `${t.type} ${t.size}` : `Exit ${t.size} (${t.pnl > 0 ? '+' : ''}${t.pnl?.toFixed(2)})`
+                  text: isOpenPosition
+                      ? `${t.type} ${t.size} (OPEN)`
+                      : (isEntry ? `${t.type} ${t.size}` : `Exit ${t.size} (${t.pnl > 0 ? '+' : ''}${t.pnl?.toFixed(2)})`)
               };
           }).filter(m => m !== null);
 

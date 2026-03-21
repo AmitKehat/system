@@ -590,7 +590,56 @@ def RSI(values, n):
 
         print(f"[SIMULATOR DEBUG] Total trades AFTER filtering: {len(trades_df)}")
 
-        if trades_df.empty:
+        # Check for open position at end of backtest
+        # backtesting.py tracks this in the equity curve - if final equity differs from
+        # cash + sum of closed trade PnLs, there's an open position
+        final_equity = None
+        if '_equity_curve' in stats and not stats['_equity_curve'].empty:
+            final_equity = stats['_equity_curve']['Equity'].iloc[-1]
+
+        closed_pnl = trades_df['PnL'].sum() if not trades_df.empty else 0
+        initial_cash = cash
+
+        # If there's a significant difference, we have an open position
+        open_position_value = final_equity - (initial_cash + closed_pnl) if final_equity else 0
+        has_open_position = abs(open_position_value) > 1  # More than $1 difference
+
+        print(f"[SIMULATOR DEBUG] Final equity: {final_equity}, Initial cash: {initial_cash}, Closed PnL: {closed_pnl}")
+        print(f"[SIMULATOR DEBUG] Open position value: {open_position_value}, Has open position: {has_open_position}")
+
+        # If there's an open position, find when it was entered by analyzing the equity curve
+        open_position_entry = None
+        if has_open_position and '_equity_curve' in stats and not stats['_equity_curve'].empty:
+            eq_df = stats['_equity_curve']
+
+            # Find the last closed trade exit time
+            last_exit_time = None
+            if not trades_df.empty:
+                last_exit_time = trades_df['ExitTime'].max()
+
+            # Look for when equity started moving after the last exit
+            # This indicates when the new position was opened
+            if last_exit_time is not None:
+                # Get equity data after the last exit
+                post_exit_eq = eq_df[eq_df.index > last_exit_time]
+                if not post_exit_eq.empty:
+                    # Find the first significant equity change (position entry)
+                    base_equity = initial_cash + closed_pnl
+                    for dt, row in post_exit_eq.iterrows():
+                        if abs(row['Equity'] - base_equity) > 100:  # Significant change
+                            open_position_entry = dt
+                            print(f"[SIMULATOR DEBUG] Open position detected! Entry date: {open_position_entry}")
+                            break
+            else:
+                # No closed trades - the open position is the first trade
+                # Find first significant equity change from initial cash
+                for dt, row in eq_df.iterrows():
+                    if abs(row['Equity'] - initial_cash) > 100:
+                        open_position_entry = dt
+                        print(f"[SIMULATOR DEBUG] Open position (first trade) detected! Entry date: {open_position_entry}")
+                        break
+
+        if trades_df.empty and not has_open_position:
             return {
                 "status": "error",
                 "message": "The strategy successfully compiled, but it executed 0 trades over the selected period.",
@@ -634,6 +683,36 @@ def RSI(values, n):
                 "pnl": safe_float(row['PnL']),
                 "size": abs(size)
             })
+
+        # Add marker for open position entry (if any)
+        if open_position_entry is not None:
+            # Estimate position size from the open position value and last price
+            last_price = df['Close'].iloc[-1] if not df.empty else 0
+            estimated_size = int(abs(open_position_value) / last_price) if last_price > 0 else 0
+
+            # Determine direction from equity change
+            direction = "Buy" if open_position_value > 0 else "Sell"
+
+            # Get the entry price from the data at entry date
+            entry_price = 0
+            try:
+                if open_position_entry in df.index:
+                    entry_price = float(df.loc[open_position_entry, 'Close'])
+                else:
+                    # Find closest date
+                    closest_idx = df.index.get_indexer([open_position_entry], method='nearest')[0]
+                    entry_price = float(df.iloc[closest_idx]['Close'])
+            except:
+                pass
+
+            trade_markers.append({
+                "time": int(open_position_entry.timestamp()),
+                "type": direction,
+                "price": safe_float(entry_price),
+                "size": estimated_size,
+                "open": True  # Flag to indicate this is an open position
+            })
+            print(f"[SIMULATOR DEBUG] Added open position marker: {direction} at {open_position_entry}, size={estimated_size}")
 
         print(f"[SIMULATOR DEBUG] Backtest complete. Return: {stats.get('Return [%]', 0)}%")
         print(f"[SIMULATOR DEBUG] Total trades in trades_df: {len(trades_df)}")
