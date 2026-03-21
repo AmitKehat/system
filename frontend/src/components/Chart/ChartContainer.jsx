@@ -680,7 +680,8 @@ export default function ChartContainer() {
               first: firstBarTime,
               firstDate: new Date(firstBarTime * 1000).toISOString(),
               last: lastBarTime,
-              lastDate: new Date(lastBarTime * 1000).toISOString()
+              lastDate: new Date(lastBarTime * 1000).toISOString(),
+              totalBars: displayBars.length
           });
       }
 
@@ -692,7 +693,7 @@ export default function ChartContainer() {
           console.log('[MARKERS DEBUG] - visible:', stratInd.visible);
           console.log('[MARKERS DEBUG] - stratInd.symbol:', stratInd.symbol);
           console.log('[MARKERS DEBUG] - trades count:', stratInd.trades?.length);
-          console.log('[MARKERS DEBUG] - trades data:', stratInd.trades?.slice(0, 5)); // Log first 5 trades
+          console.log('[MARKERS DEBUG] - trades data:', JSON.stringify(stratInd.trades?.slice(0, 10))); // Log first 10 trades as JSON
 
           // Skip hidden strategies
           if (stratInd.visible === false) {

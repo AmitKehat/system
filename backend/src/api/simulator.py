@@ -567,13 +567,28 @@ def RSI(values, n):
 
         trades_df = stats['_trades']
 
+        # Debug: Print ALL trades before filtering
+        print(f"[SIMULATOR DEBUG] Total trades BEFORE filtering: {len(trades_df)}")
+        if not trades_df.empty:
+            for idx, row in trades_df.iterrows():
+                print(f"[SIMULATOR DEBUG] Trade {idx}: Entry={row['EntryTime']}, Exit={row['ExitTime']}, Size={row['Size']}, PnL={row['PnL']:.2f}")
+
         # Filter trades to only include those within the requested date range
         # (exclude warmup period trades)
         if not trades_df.empty and warmup_days > 0:
-            actual_start_dt = pd.Timestamp(actual_start_date)
+            actual_start_dt = pd.Timestamp(actual_start_date).tz_localize(None)  # Ensure no timezone
+            print(f"[SIMULATOR DEBUG] Filtering by EntryTime >= {actual_start_dt}")
             original_count = len(trades_df)
-            trades_df = trades_df[trades_df['EntryTime'] >= actual_start_dt]
+
+            # Make sure EntryTime is also timezone-naive for comparison
+            trades_df_copy = trades_df.copy()
+            if trades_df_copy['EntryTime'].dt.tz is not None:
+                trades_df_copy['EntryTime'] = trades_df_copy['EntryTime'].dt.tz_localize(None)
+
+            trades_df = trades_df[trades_df_copy['EntryTime'] >= actual_start_dt]
             print(f"[SIMULATOR DEBUG] Filtered trades: {original_count} -> {len(trades_df)} (removed warmup period trades)")
+
+        print(f"[SIMULATOR DEBUG] Total trades AFTER filtering: {len(trades_df)}")
 
         if trades_df.empty:
             return {
