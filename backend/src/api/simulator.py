@@ -612,16 +612,33 @@ def RSI(values, n):
             # Look for when equity started moving after the last exit
             # This indicates when the new position was opened
             if last_exit_time is not None:
+                # Get baseline equity AT the last exit (position just closed, only cash remains)
+                try:
+                    if last_exit_time in full_eq_df.index:
+                        baseline_equity = full_eq_df.loc[last_exit_time, 'Equity']
+                    else:
+                        # Find closest index to last exit time
+                        idx = full_eq_df.index.get_indexer([last_exit_time], method='nearest')[0]
+                        baseline_equity = full_eq_df.iloc[idx]['Equity']
+                    print(f"[SIMULATOR] Baseline equity at exit: ${baseline_equity:.2f}")
+                except Exception as e:
+                    print(f"[SIMULATOR] Could not get baseline equity: {e}")
+                    baseline_equity = initial_cash + all_closed_pnl
+
                 # Get equity data after the last exit
                 post_exit_eq = period_eq_df[period_eq_df.index > last_exit_time]
                 if not post_exit_eq.empty:
-                    # Find the first day with equity change (position entry)
-                    # The entry is the first day after last exit
+                    # Find the first day where equity CHANGES from baseline
+                    # This is when the new position was opened
                     for dt, row in post_exit_eq.iterrows():
-                        # Entry is when we see the position's effect on equity
-                        open_position_entry = dt
-                        print(f"[SIMULATOR] Found open position entry at: {dt}")
-                        break
+                        equity_change = abs(row['Equity'] - baseline_equity)
+                        if equity_change > 50:  # More than $50 change indicates position entry
+                            open_position_entry = dt
+                            print(f"[SIMULATOR] Found open position entry at: {dt} (equity change: ${equity_change:.2f})")
+                            break
+
+                    if open_position_entry is None:
+                        print(f"[SIMULATOR] WARNING: No equity change detected after exit. Post-exit rows: {len(post_exit_eq)}")
             else:
                 # No closed trades in actual period - open position is from first trade in period
                 for dt, row in period_eq_df.iterrows():
