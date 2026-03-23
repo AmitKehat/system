@@ -479,8 +479,6 @@ CRITICAL RULES:
         }
 
     # We have code - run the backtest!
-    print(f"[SIMULATOR DEBUG] Running backtest for symbol: {req.symbol}")
-
     # Extract indicators from code to determine warmup period
     code_indicators = extract_indicators_from_code(strategy_code)
     llm_indicators = []
@@ -488,7 +486,6 @@ CRITICAL RULES:
         llm_indicators = param_update["indicators"]
     all_indicators = llm_indicators + code_indicators
     max_period = get_max_indicator_period(all_indicators, strategy_code)
-    print(f"[SIMULATOR DEBUG] Max indicator period detected: {max_period}")
 
     try:
         start_date = req.parameters.get("startDate", "2023-01-01")
@@ -508,11 +505,8 @@ CRITICAL RULES:
         warmup_start_date = actual_start_date - pd.Timedelta(days=warmup_days)
         warmup_start_str = warmup_start_date.strftime('%Y-%m-%d')
 
-        print(f"[SIMULATOR DEBUG] Requested date range: {start_date} to {end_date}")
-        print(f"[SIMULATOR DEBUG] Warmup period: {warmup_days} days, fetching from: {warmup_start_str}")
-
+        print(f"[SIMULATOR] Running backtest for {req.symbol} ({start_date} to {end_date}), warmup: {warmup_days} days")
         df = yf.download(req.symbol, start=warmup_start_str, end=end_date, progress=False)
-        print(f"[SIMULATOR DEBUG] Downloaded {len(df)} rows (including warmup)")
 
         if df.empty:
             raise ValueError(f"No data fetched for {req.symbol}")
@@ -567,17 +561,10 @@ def RSI(values, n):
 
         trades_df = stats['_trades']
 
-        # Debug: Print ALL trades before filtering
-        print(f"[SIMULATOR DEBUG] Total trades BEFORE filtering: {len(trades_df)}")
-        if not trades_df.empty:
-            for idx, row in trades_df.iterrows():
-                print(f"[SIMULATOR DEBUG] Trade {idx}: Entry={row['EntryTime']}, Exit={row['ExitTime']}, Size={row['Size']}, PnL={row['PnL']:.2f}")
-
         # Filter trades to only include those within the requested date range
         # (exclude warmup period trades)
         if not trades_df.empty and warmup_days > 0:
-            actual_start_dt = pd.Timestamp(actual_start_date).tz_localize(None)  # Ensure no timezone
-            print(f"[SIMULATOR DEBUG] Filtering by EntryTime >= {actual_start_dt}")
+            actual_start_dt = pd.Timestamp(actual_start_date).tz_localize(None)
             original_count = len(trades_df)
 
             # Make sure EntryTime is also timezone-naive for comparison
@@ -586,57 +573,61 @@ def RSI(values, n):
                 trades_df_copy['EntryTime'] = trades_df_copy['EntryTime'].dt.tz_localize(None)
 
             trades_df = trades_df[trades_df_copy['EntryTime'] >= actual_start_dt]
-            print(f"[SIMULATOR DEBUG] Filtered trades: {original_count} -> {len(trades_df)} (removed warmup period trades)")
-
-        print(f"[SIMULATOR DEBUG] Total trades AFTER filtering: {len(trades_df)}")
+            if original_count != len(trades_df):
+                print(f"[SIMULATOR] Filtered trades: {original_count} -> {len(trades_df)}")
 
         # Check for open position at end of backtest
         # backtesting.py tracks this in the equity curve - if final equity differs from
         # cash + sum of closed trade PnLs, there's an open position
         final_equity = None
+        full_eq_df = None
         if '_equity_curve' in stats and not stats['_equity_curve'].empty:
-            final_equity = stats['_equity_curve']['Equity'].iloc[-1]
+            full_eq_df = stats['_equity_curve']
+            final_equity = full_eq_df['Equity'].iloc[-1]
 
-        closed_pnl = trades_df['PnL'].sum() if not trades_df.empty else 0
+        # Use ALL trades (including warmup) for open position calculation
+        all_trades_df = stats['_trades']
+        all_closed_pnl = all_trades_df['PnL'].sum() if not all_trades_df.empty else 0
         initial_cash = cash
 
-        # If there's a significant difference, we have an open position
-        open_position_value = final_equity - (initial_cash + closed_pnl) if final_equity else 0
+        # If there's a significant difference between final equity and (cash + all closed PnL),
+        # there's an open position
+        open_position_value = final_equity - (initial_cash + all_closed_pnl) if final_equity else 0
         has_open_position = abs(open_position_value) > 1  # More than $1 difference
 
-        print(f"[SIMULATOR DEBUG] Final equity: {final_equity}, Initial cash: {initial_cash}, Closed PnL: {closed_pnl}")
-        print(f"[SIMULATOR DEBUG] Open position value: {open_position_value}, Has open position: {has_open_position}")
+        print(f"[SIMULATOR] Open position check: final_equity={final_equity}, initial_cash={initial_cash}, all_closed_pnl={all_closed_pnl:.2f}, diff={open_position_value:.2f}, has_open={has_open_position}")
 
         # If there's an open position, find when it was entered by analyzing the equity curve
         open_position_entry = None
-        if has_open_position and '_equity_curve' in stats and not stats['_equity_curve'].empty:
-            eq_df = stats['_equity_curve']
+        if has_open_position and full_eq_df is not None:
+            # Filter equity to actual period (after warmup)
+            period_eq_df = full_eq_df[full_eq_df.index >= actual_start_date]
 
-            # Find the last closed trade exit time
+            # Find the last closed trade exit time (within the actual period)
             last_exit_time = None
             if not trades_df.empty:
                 last_exit_time = trades_df['ExitTime'].max()
+                print(f"[SIMULATOR] Last closed trade exit: {last_exit_time}")
 
             # Look for when equity started moving after the last exit
             # This indicates when the new position was opened
             if last_exit_time is not None:
                 # Get equity data after the last exit
-                post_exit_eq = eq_df[eq_df.index > last_exit_time]
+                post_exit_eq = period_eq_df[period_eq_df.index > last_exit_time]
                 if not post_exit_eq.empty:
-                    # Find the first significant equity change (position entry)
-                    base_equity = initial_cash + closed_pnl
+                    # Find the first day with equity change (position entry)
+                    # The entry is the first day after last exit
                     for dt, row in post_exit_eq.iterrows():
-                        if abs(row['Equity'] - base_equity) > 100:  # Significant change
-                            open_position_entry = dt
-                            print(f"[SIMULATOR DEBUG] Open position detected! Entry date: {open_position_entry}")
-                            break
+                        # Entry is when we see the position's effect on equity
+                        open_position_entry = dt
+                        print(f"[SIMULATOR] Found open position entry at: {dt}")
+                        break
             else:
-                # No closed trades - the open position is the first trade
-                # Find first significant equity change from initial cash
-                for dt, row in eq_df.iterrows():
+                # No closed trades in actual period - open position is from first trade in period
+                for dt, row in period_eq_df.iterrows():
                     if abs(row['Equity'] - initial_cash) > 100:
                         open_position_entry = dt
-                        print(f"[SIMULATOR DEBUG] Open position (first trade) detected! Entry date: {open_position_entry}")
+                        print(f"[SIMULATOR] Found open position entry (no prior trades) at: {dt}")
                         break
 
         if trades_df.empty and not has_open_position:
@@ -712,26 +703,18 @@ def RSI(values, n):
                 "size": estimated_size,
                 "open": True  # Flag to indicate this is an open position
             })
-            print(f"[SIMULATOR DEBUG] Added open position marker: {direction} at {open_position_entry}, size={estimated_size}")
+            print(f"[SIMULATOR] Open position detected: {direction} on {open_position_entry.strftime('%Y-%m-%d')}")
 
-        print(f"[SIMULATOR DEBUG] Backtest complete. Return: {stats.get('Return [%]', 0)}%")
-        print(f"[SIMULATOR DEBUG] Total trades in trades_df: {len(trades_df)}")
-        print(f"[SIMULATOR DEBUG] Trade markers created: {len(trade_markers)}")
-
-        # Debug: print first few trades if any
-        if len(trades_df) > 0:
-            for idx, row in trades_df.head(3).iterrows():
-                print(f"[SIMULATOR DEBUG] Trade {idx}: Entry={row['EntryTime']}, Exit={row['ExitTime']}, Size={row['Size']}, PnL={row['PnL']}")
+        # Summary log
+        print(f"[SIMULATOR] Backtest complete: {len(trades_df)} closed trades, {len(trade_markers)} markers, Return: {stats.get('Return [%]', 0):.2f}%")
 
         # Generate code hash for strategy identification
         code_hash = generate_code_hash(strategy_code)
-        print(f"[SIMULATOR DEBUG] Generated code hash: {code_hash}")
 
         # Extract strategy name from param_update or generate default
         strategy_name = "Custom Strategy"
         if param_update and "strategyName" in param_update:
             strategy_name = param_update["strategyName"]
-        print(f"[SIMULATOR DEBUG] Strategy name: {strategy_name}")
 
         # Extract indicators - combine LLM-provided and code-extracted
         llm_indicators = []
@@ -748,8 +731,6 @@ def RSI(values, n):
 
         # Extract indicators from code as validation/fallback
         code_indicators = extract_indicators_from_code(strategy_code)
-        print(f"[SIMULATOR DEBUG] LLM indicators: {llm_indicators}")
-        print(f"[SIMULATOR DEBUG] Code indicators: {code_indicators}")
 
         # Use LLM indicators if provided, otherwise use code-extracted
         # Merge: add any code-extracted indicators not in LLM list
@@ -759,8 +740,6 @@ def RSI(values, n):
             key = f"{ind['type']}_{ind['period']}"
             if key not in llm_keys:
                 strategy_indicators.append(ind)
-
-        print(f"[SIMULATOR DEBUG] Final strategy_indicators: {strategy_indicators}")
 
         # Always include symbol in param_update for frontend to change chart
         if not param_update:

@@ -660,83 +660,32 @@ export default function ChartContainer() {
 
   // --- TRADES/MARKERS LOGIC (RENDERS FROM ALL VISIBLE STRATEGY INDICATORS) ---
   useEffect(() => {
-      console.log('[MARKERS DEBUG] useEffect triggered');
-      console.log('[MARKERS DEBUG] strategyIndicators:', strategyIndicators);
-      console.log('[MARKERS DEBUG] displayBars.length:', displayBars.length);
-      console.log('[MARKERS DEBUG] current symbol:', symbol);
-      console.log('[MARKERS DEBUG] barSize:', barSize);
-
       if (!mainChartRef.current || !mainSeriesRef.current.has('candles')) {
-          console.log('[MARKERS DEBUG] No chart or candles series yet');
           return;
       }
       const candleSeries = mainSeriesRef.current.get('candles');
-
-      // Log chart bar time range
-      if (displayBars.length > 0) {
-          const firstBarTime = displayBars[0].time;
-          const lastBarTime = displayBars[displayBars.length - 1].time;
-          console.log('[MARKERS DEBUG] Chart bar range:', {
-              first: firstBarTime,
-              firstDate: new Date(firstBarTime * 1000).toISOString(),
-              last: lastBarTime,
-              lastDate: new Date(lastBarTime * 1000).toISOString(),
-              totalBars: displayBars.length
-          });
-      }
 
       // Collect markers from all visible strategy indicators that match current symbol
       const allMarkers = [];
 
       for (const stratInd of strategyIndicators) {
-          console.log('[MARKERS DEBUG] Processing strategy:', stratInd.id, stratInd.name);
-          console.log('[MARKERS DEBUG] - visible:', stratInd.visible);
-          console.log('[MARKERS DEBUG] - stratInd.symbol:', stratInd.symbol);
-          console.log('[MARKERS DEBUG] - trades count:', stratInd.trades?.length);
-          console.log('[MARKERS DEBUG] - trades data:', JSON.stringify(stratInd.trades?.slice(0, 10))); // Log first 10 trades as JSON
-
           // Skip hidden strategies
-          if (stratInd.visible === false) {
-              console.log('[MARKERS DEBUG] - SKIPPED: hidden');
-              continue;
-          }
+          if (stratInd.visible === false) continue;
 
           // Skip strategies for different symbols
-          if (stratInd.symbol && stratInd.symbol.toUpperCase() !== symbol.toUpperCase()) {
-              console.log('[MARKERS DEBUG] - SKIPPED: symbol mismatch');
-              continue;
-          }
+          if (stratInd.symbol && stratInd.symbol.toUpperCase() !== symbol.toUpperCase()) continue;
 
           // Skip if no trades data
-          if (!stratInd.trades || !Array.isArray(stratInd.trades) || stratInd.trades.length === 0) {
-              console.log('[MARKERS DEBUG] - SKIPPED: no trades');
-              continue;
-          }
+          if (!stratInd.trades || !Array.isArray(stratInd.trades) || stratInd.trades.length === 0) continue;
 
-          if (displayBars.length === 0) {
-              console.log('[MARKERS DEBUG] - SKIPPED: no display bars');
-              continue;
-          }
-
-          // Log first trade time vs chart range
-          if (stratInd.trades.length > 0) {
-              const firstTrade = stratInd.trades[0];
-              console.log('[MARKERS DEBUG] First trade:', {
-                  time: firstTrade.time,
-                  date: new Date(firstTrade.time * 1000).toISOString(),
-                  type: firstTrade.type
-              });
-          }
+          if (displayBars.length === 0) continue;
 
           const barTimes = displayBars.map(b => b.time);
           const barTimeSet = new Set(barTimes);
 
           // Snaps the marker time to the exact timestamp of the nearest available candle
           const getClosestTime = (targetTs) => {
-              // First check if exact match exists
-              if (barTimeSet.has(targetTs)) {
-                  return targetTs;
-              }
+              if (barTimeSet.has(targetTs)) return targetTs;
 
               let closest = barTimes[0];
               let minDiff = Math.abs(targetTs - closest);
@@ -748,17 +697,7 @@ export default function ChartContainer() {
                   }
               }
               // Allow snapping within 7 days
-              const snapped = minDiff < 86400 * 7 ? closest : null;
-              if (!snapped) {
-                  console.log('[MARKERS DEBUG] Trade time too far from any bar:', {
-                      tradeTime: targetTs,
-                      tradeDate: new Date(targetTs * 1000).toISOString(),
-                      closestBar: closest,
-                      closestDate: new Date(closest * 1000).toISOString(),
-                      diffDays: (minDiff / 86400).toFixed(1)
-                  });
-              }
-              return snapped;
+              return minDiff < 86400 * 7 ? closest : null;
           };
 
           const rawMarkers = stratInd.trades.map(t => {
@@ -779,10 +718,6 @@ export default function ChartContainer() {
               };
           }).filter(m => m !== null);
 
-          console.log('[MARKERS DEBUG] - Adding', rawMarkers.length, 'markers from this strategy (after filtering)');
-          if (rawMarkers.length > 0) {
-              console.log('[MARKERS DEBUG] - First marker after snap:', rawMarkers[0]);
-          }
           allMarkers.push(...rawMarkers);
       }
 
@@ -803,22 +738,18 @@ export default function ChartContainer() {
           }
       }
 
-      console.log('[MARKERS DEBUG] Final uniqueMarkers count:', uniqueMarkers.length);
+      // Single summary log
       if (uniqueMarkers.length > 0) {
-          console.log('[MARKERS DEBUG] First final marker:', uniqueMarkers[0]);
-          console.log('[MARKERS DEBUG] Last final marker:', uniqueMarkers[uniqueMarkers.length - 1]);
+          console.log(`[MARKERS] Rendering ${uniqueMarkers.length} markers for ${symbol}`);
       }
 
       // Use v5 markers plugin API
       if (markersPluginRef.current) {
           try {
               markersPluginRef.current.setMarkers(uniqueMarkers);
-              console.log('[MARKERS DEBUG] v5 plugin setMarkers called successfully with', uniqueMarkers.length, 'markers');
           } catch (e) {
-              console.log('[MARKERS DEBUG] v5 plugin setMarkers error:', e);
+              console.error('[MARKERS] Error setting markers:', e);
           }
-      } else {
-          console.log('[MARKERS DEBUG] WARNING: markersPluginRef.current is null - plugin not initialized yet');
       }
   }, [strategyIndicators, displayBars, symbol, barSize]);
 
