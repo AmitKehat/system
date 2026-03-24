@@ -913,6 +913,10 @@ def RSI(values, n):
         total_pnl_usd = final_equity_value - cash
         max_drawdown_usd = calculate_max_drawdown_usd(unique_equity)
 
+        # IMPORTANT: Calculate return percentage from NORMALIZED equity curve, not raw stats
+        # The stats.get('Return [%]') includes warmup period which we don't want
+        normalized_return_pct = (total_pnl_usd / cash) * 100 if cash > 0 else 0.0
+
         return {
             "status": "success",
             "message": "Strategy executed successfully.",
@@ -923,8 +927,8 @@ def RSI(values, n):
             "param_update": param_update,
             "results": {
                 "symbol": req.symbol,
-                # Percentage metrics
-                "return_pct": safe_float(stats.get('Return [%]', 0.0)),
+                # Percentage metrics - use normalized return
+                "return_pct": safe_float(normalized_return_pct),
                 "win_rate": safe_float(stats.get('Win Rate [%]', 0.0)),
                 "max_drawdown_pct": safe_float(stats.get('Max. Drawdown [%]', 0.0)),
                 "sharpe": safe_float(stats.get('Sharpe Ratio', 0.0)),
@@ -1109,10 +1113,13 @@ def RSI(values, n):
         total_pnl_usd = final_equity_value - cash
         max_drawdown_usd = calculate_max_drawdown_usd(unique_equity)
 
+        # IMPORTANT: Calculate return percentage from NORMALIZED equity curve
+        normalized_return_pct = (total_pnl_usd / cash) * 100 if cash > 0 else 0.0
+
         # Generate code hash
         code_hash = generate_code_hash(strategy_code)
 
-        print(f"[SIMULATOR] Rerun complete: {len(trades_df)} trades, Return: {stats.get('Return [%]', 0):.2f}%")
+        print(f"[SIMULATOR] Rerun complete: {len(trades_df)} trades, Return: {normalized_return_pct:.2f}%")
 
         return {
             "status": "success",
@@ -1121,7 +1128,7 @@ def RSI(values, n):
             "code_hash": code_hash,
             "results": {
                 "symbol": req.symbol,
-                "return_pct": safe_float(stats.get('Return [%]', 0.0)),
+                "return_pct": safe_float(normalized_return_pct),
                 "win_rate": safe_float(stats.get('Win Rate [%]', 0.0)),
                 "max_drawdown_pct": safe_float(stats.get('Max. Drawdown [%]', 0.0)),
                 "sharpe": safe_float(stats.get('Sharpe Ratio', 0.0)),
