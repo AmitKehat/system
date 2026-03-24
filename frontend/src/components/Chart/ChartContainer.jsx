@@ -133,7 +133,13 @@ export default function ChartContainer() {
   
   const simResults = useSimulatorStore((s) => s.results);
   const simMode = useSimulatorStore((s) => s.mode);
+  const selectedTradeIndex = useSimulatorStore((s) => s.selectedTradeIndex);
+  const clearSelectedTrade = useSimulatorStore((s) => s.clearSelectedTrade);
   const hasSimResults = !!(simResults && simResults.equity_curve && simResults.equity_curve.length > 0);
+
+  // Blinking state for selected trade marker
+  const blinkStateRef = useRef(false);
+  const blinkIntervalRef = useRef(null);
 
   // Get all strategy indicators for trade markers
   const strategyIndicators = useMemo(() => {
@@ -660,34 +666,78 @@ export default function ChartContainer() {
   }, [strategyIndicators, displayBars, symbol]);
 
   // --- TRADES/MARKERS LOGIC (RENDERS FROM ALL VISIBLE STRATEGY INDICATORS) ---
+  // Get selected trade's entry/exit times for highlighting
+  const selectedTradeTimes = useMemo(() => {
+      if (selectedTradeIndex === null || !simResults?.trades_detailed) return null;
+      const trade = simResults.trades_detailed[selectedTradeIndex];
+      if (!trade) return null;
+      return {
+          entryTime: trade.entry_time,
+          exitTime: trade.exit_time
+      };
+  }, [selectedTradeIndex, simResults]);
+
+  // Blinking effect for selected trade
   useEffect(() => {
-      if (!mainChartRef.current || !mainSeriesRef.current.has('candles')) {
+      // Clear any existing interval
+      if (blinkIntervalRef.current) {
+          clearInterval(blinkIntervalRef.current);
+          blinkIntervalRef.current = null;
+      }
+
+      if (selectedTradeIndex === null || !selectedTradeTimes) {
+          blinkStateRef.current = false;
           return;
       }
-      const candleSeries = mainSeriesRef.current.get('candles');
 
-      // Collect markers from all visible strategy indicators that match current symbol
+      // Start blinking
+      blinkStateRef.current = true;
+      let blinkCount = 0;
+      const maxBlinks = 10; // Blink 5 times (on/off = 2 counts per blink)
+
+      blinkIntervalRef.current = setInterval(() => {
+          blinkStateRef.current = !blinkStateRef.current;
+          blinkCount++;
+
+          // Force re-render of markers
+          if (markersPluginRef.current && mainSeriesRef.current.has('candles')) {
+              updateMarkersWithHighlight();
+          }
+
+          // Stop blinking after maxBlinks
+          if (blinkCount >= maxBlinks) {
+              clearInterval(blinkIntervalRef.current);
+              blinkIntervalRef.current = null;
+              blinkStateRef.current = true; // Keep highlighted
+          }
+      }, 300);
+
+      return () => {
+          if (blinkIntervalRef.current) {
+              clearInterval(blinkIntervalRef.current);
+              blinkIntervalRef.current = null;
+          }
+      };
+  }, [selectedTradeIndex, selectedTradeTimes]);
+
+  // Function to update markers with highlight
+  const updateMarkersWithHighlight = useCallback(() => {
+      if (!mainChartRef.current || !mainSeriesRef.current.has('candles')) return;
+      if (!markersPluginRef.current) return;
+
       const allMarkers = [];
 
       for (const stratInd of strategyIndicators) {
-          // Skip hidden strategies
           if (stratInd.visible === false) continue;
-
-          // Skip strategies for different symbols
           if (stratInd.symbol && stratInd.symbol.toUpperCase() !== symbol.toUpperCase()) continue;
-
-          // Skip if no trades data
           if (!stratInd.trades || !Array.isArray(stratInd.trades) || stratInd.trades.length === 0) continue;
-
           if (displayBars.length === 0) continue;
 
           const barTimes = displayBars.map(b => b.time);
           const barTimeSet = new Set(barTimes);
 
-          // Snaps the marker time to the exact timestamp of the nearest available candle
           const getClosestTime = (targetTs) => {
               if (barTimeSet.has(targetTs)) return targetTs;
-
               let closest = barTimes[0];
               let minDiff = Math.abs(targetTs - closest);
               for (let i = 1; i < barTimes.length; i++) {
@@ -697,22 +747,41 @@ export default function ChartContainer() {
                       closest = barTimes[i];
                   }
               }
-              // Allow snapping within 7 days
               return minDiff < 86400 * 7 ? closest : null;
           };
 
           const rawMarkers = stratInd.trades.map(t => {
               const snappedTime = getClosestTime(t.time);
-              if (snappedTime === null) return null; // Skip trades outside chart range
+              if (snappedTime === null) return null;
 
               const isEntry = t.type !== 'Exit';
               const isOpenPosition = t.open === true;
 
+              // Check if this marker belongs to the selected trade
+              const isSelectedEntry = selectedTradeTimes &&
+                  Math.abs(t.time - selectedTradeTimes.entryTime) < 86400;
+              const isSelectedExit = selectedTradeTimes && selectedTradeTimes.exitTime &&
+                  Math.abs(t.time - selectedTradeTimes.exitTime) < 86400;
+              const isSelected = isSelectedEntry || isSelectedExit;
+
+              // Determine marker appearance based on selection and blink state
+              let markerColor = isOpenPosition ? '#ff9800' : (isEntry ? '#089981' : '#f23645');
+              let markerSize = 1;
+
+              if (isSelected) {
+                  // Make selected marker larger and use highlight color when blinking
+                  markerSize = blinkStateRef.current ? 3 : 1.5;
+                  if (blinkStateRef.current) {
+                      markerColor = '#ffeb3b'; // Yellow highlight when blinking "on"
+                  }
+              }
+
               return {
                   time: snappedTime,
                   position: isEntry ? 'belowBar' : 'aboveBar',
-                  color: isOpenPosition ? '#ff9800' : (isEntry ? '#089981' : '#f23645'), // Orange for open positions
+                  color: markerColor,
                   shape: isEntry ? 'arrowUp' : 'arrowDown',
+                  size: markerSize,
                   text: isOpenPosition
                       ? `${t.type} ${t.size} (OPEN)`
                       : (isEntry ? `${t.type} ${t.size}` : `Exit ${t.size} (${t.pnl > 0 ? '+' : ''}${t.pnl?.toFixed(2)})`)
@@ -722,11 +791,9 @@ export default function ChartContainer() {
           allMarkers.push(...rawMarkers);
       }
 
-      // Remove invalid markers and sort by time
       const validMarkers = allMarkers.filter(m => m.time != null && !isNaN(m.time));
       validMarkers.sort((a, b) => a.time - b.time);
 
-      // Deduplicate markers with same timestamp (merge text)
       const uniqueMarkers = [];
       const timeSet = new Set();
       for (const m of validMarkers) {
@@ -735,24 +802,37 @@ export default function ChartContainer() {
               timeSet.add(m.time);
           } else {
               const existing = uniqueMarkers.find(um => um.time === m.time);
-              if (existing) existing.text += ` & ${m.text}`;
+              if (existing) {
+                  existing.text += ` & ${m.text}`;
+                  // If any marker at this time is selected, keep the highlight
+                  if (m.size > existing.size) {
+                      existing.size = m.size;
+                      existing.color = m.color;
+                  }
+              }
           }
       }
+
+      try {
+          markersPluginRef.current.setMarkers(uniqueMarkers);
+      } catch (e) {
+          console.error('[MARKERS] Error setting markers:', e);
+      }
+  }, [strategyIndicators, displayBars, symbol, selectedTradeTimes]);
+
+  useEffect(() => {
+      if (!mainChartRef.current || !mainSeriesRef.current.has('candles')) {
+          return;
+      }
+
+      // Use the updateMarkersWithHighlight function for initial render and updates
+      updateMarkersWithHighlight();
 
       // Single summary log
-      if (uniqueMarkers.length > 0) {
-          console.log(`[MARKERS] Rendering ${uniqueMarkers.length} markers for ${symbol}`);
+      if (strategyIndicators.some(s => s.trades?.length > 0)) {
+          console.log(`[MARKERS] Updated markers for ${symbol}`);
       }
-
-      // Use v5 markers plugin API
-      if (markersPluginRef.current) {
-          try {
-              markersPluginRef.current.setMarkers(uniqueMarkers);
-          } catch (e) {
-              console.error('[MARKERS] Error setting markers:', e);
-          }
-      }
-  }, [strategyIndicators, displayBars, symbol, barSize]);
+  }, [strategyIndicators, displayBars, symbol, barSize, selectedTradeIndex, updateMarkersWithHighlight]);
 
   useEffect(() => {
     if (!mainChartRef.current) return;

@@ -669,11 +669,23 @@ function EquityChart({ results, theme, onTradeClick, initialCapital }) {
     chart.subscribeClick((param) => {
       if (!param.point || !param.time) return;
 
-      // Find if click is near a trade marker
+      // Find if click is near a trade marker (check both entry and exit times)
       const clickTime = param.time;
       if (results?.trades_detailed) {
         for (let i = 0; i < results.trades_detailed.length; i++) {
           const trade = results.trades_detailed[i];
+
+          // Check entry time
+          if (trade.entry_time) {
+            const entryDate = new Date(trade.entry_time * 1000);
+            const entryDateStr = entryDate.toISOString().split('T')[0];
+            if (entryDateStr === clickTime) {
+              onTradeClick(i);
+              return;
+            }
+          }
+
+          // Check exit time
           if (trade.exit_time) {
             const exitDate = new Date(trade.exit_time * 1000);
             const exitDateStr = exitDate.toISOString().split('T')[0];
@@ -831,17 +843,38 @@ export default function StrategyTesterPane({ results, theme, onClose, onTradeCli
     if (openTrade) allTrades.push(openTrade);
     const trade = allTrades[tradeIndex];
 
-    // Scroll main chart to trade
+    // Scroll main chart to center on the trade
     if (mainChart && trade) {
       try {
-        // Use entry_time for open trades, exit_time for closed trades
-        const tradeTime = trade.exit_time || trade.entry_time;
+        // Use entry_time for the trade location
+        const tradeTime = trade.entry_time;
         if (tradeTime) {
-          const date = new Date(tradeTime * 1000);
-          const dateStr = date.toISOString().split('T')[0];
+          const timeScale = mainChart.timeScale();
 
-          // Find the bar index and scroll to center it
-          mainChart.timeScale().scrollToPosition(-10, true);
+          // Get current visible range to calculate the width
+          const visibleRange = timeScale.getVisibleLogicalRange();
+          if (visibleRange) {
+            const rangeWidth = visibleRange.to - visibleRange.from;
+            const halfWidth = rangeWidth / 2;
+
+            // Convert timestamp to the chart's time format (YYYY-MM-DD for daily bars)
+            const tradeDate = new Date(tradeTime * 1000);
+            const tradeDateStr = tradeDate.toISOString().split('T')[0];
+
+            // Find the logical index of this bar
+            const coordinate = timeScale.timeToCoordinate(tradeDateStr);
+            if (coordinate !== null) {
+              // Get the logical index from the coordinate
+              const logicalIndex = timeScale.coordinateToLogical(coordinate);
+              if (logicalIndex !== null) {
+                // Set visible range centered on the trade
+                const newFrom = logicalIndex - halfWidth;
+                const newTo = logicalIndex + halfWidth;
+                timeScale.setVisibleLogicalRange({ from: newFrom, to: newTo });
+                console.log(`[STRATEGY TESTER] Scrolled to trade #${trade.trade_num} at ${tradeDateStr}`);
+              }
+            }
+          }
         }
       } catch (e) {
         console.error('[STRATEGY TESTER] Error scrolling to trade:', e);
