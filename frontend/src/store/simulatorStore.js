@@ -77,22 +77,29 @@ export const useSimulatorStore = create(
                   console.log(`[SIMULATOR] Rerun SUCCESS: ${data.results?.total_trades} trades, ${data.results?.return_pct?.toFixed(2)}%`);
 
                   // Update chart timeframe if needed
+                  // IMPORTANT: Chart loads data from TODAY backwards, so calculate
+                  // how many days from TODAY to the backtest START date
                   const chartStore = useChartStore.getState();
-                  const start = new Date(startDate);
-                  const end = new Date(endDate);
-                  const daysDiff = Math.ceil((end - start) / (1000 * 60 * 60 * 24));
+                  const backtestStart = new Date(startDate);
+                  const today = new Date();
+                  const daysFromTodayToStart = Math.ceil((today - backtestStart) / (1000 * 60 * 60 * 24));
+                  const requiredDays = daysFromTodayToStart + 30; // Buffer for indicators
 
                   let targetDuration = '1 Y';
-                  if (daysDiff <= 7) targetDuration = '1 W';
-                  else if (daysDiff <= 30) targetDuration = '1 M';
-                  else if (daysDiff <= 90) targetDuration = '3 M';
-                  else if (daysDiff <= 180) targetDuration = '6 M';
-                  else if (daysDiff <= 365) targetDuration = '1 Y';
-                  else if (daysDiff <= 730) targetDuration = '2 Y';
-                  else targetDuration = '5 Y';
+                  if (requiredDays <= 7) targetDuration = '1 W';
+                  else if (requiredDays <= 30) targetDuration = '1 M';
+                  else if (requiredDays <= 90) targetDuration = '3 M';
+                  else if (requiredDays <= 180) targetDuration = '6 M';
+                  else if (requiredDays <= 365) targetDuration = '1 Y';
+                  else if (requiredDays <= 730) targetDuration = '2 Y';
+                  else if (requiredDays <= 1825) targetDuration = '5 Y';
+                  else targetDuration = '10 Y';
+
+                  console.log(`[SIMULATOR] Rerun: days from today to start: ${daysFromTodayToStart}, required: ${requiredDays} -> duration: ${targetDuration}`);
 
                   if (chartStore.duration !== targetDuration) {
                       chartStore.setDuration(targetDuration);
+                      chartStore.reloadChart();
                   }
 
                   // Update results and parameters
@@ -158,23 +165,29 @@ export const useSimulatorStore = create(
               const chartStore = useChartStore.getState();
 
               // Calculate duration needed to show full backtest period
+              // IMPORTANT: Chart loads data from TODAY backwards, so we need to calculate
+              // how many days from TODAY to the backtest START date
               const startDate = data.param_update?.startDate || parameters.startDate;
               const endDate = data.param_update?.endDate || parameters.endDate;
-              const start = new Date(startDate);
-              const end = new Date(endDate);
-              const daysDiff = Math.ceil((end - start) / (1000 * 60 * 60 * 24));
+              const backtestStart = new Date(startDate);
+              const today = new Date();
+              const daysFromTodayToStart = Math.ceil((today - backtestStart) / (1000 * 60 * 60 * 24));
 
-              // Choose appropriate duration for the backtest period
+              // Choose appropriate duration to cover from today back to backtest start
+              // Add some buffer days for warmup indicators
+              const requiredDays = daysFromTodayToStart + 30;
               let targetDuration = '1 Y';
-              if (daysDiff <= 7) targetDuration = '1 W';
-              else if (daysDiff <= 30) targetDuration = '1 M';
-              else if (daysDiff <= 90) targetDuration = '3 M';
-              else if (daysDiff <= 180) targetDuration = '6 M';
-              else if (daysDiff <= 365) targetDuration = '1 Y';
-              else if (daysDiff <= 730) targetDuration = '2 Y';
-              else targetDuration = '5 Y';
+              if (requiredDays <= 7) targetDuration = '1 W';
+              else if (requiredDays <= 30) targetDuration = '1 M';
+              else if (requiredDays <= 90) targetDuration = '3 M';
+              else if (requiredDays <= 180) targetDuration = '6 M';
+              else if (requiredDays <= 365) targetDuration = '1 Y';
+              else if (requiredDays <= 730) targetDuration = '2 Y';
+              else if (requiredDays <= 1825) targetDuration = '5 Y';
+              else targetDuration = '10 Y';
 
-              console.log(`[SIMULATOR] Backtest period: ${startDate} to ${endDate} (${daysDiff} days) -> duration: ${targetDuration}`);
+              console.log(`[SIMULATOR] Backtest period: ${startDate} to ${endDate}`);
+              console.log(`[SIMULATOR] Days from today to start: ${daysFromTodayToStart}, required: ${requiredDays} -> duration: ${targetDuration}`);
 
               // Switch chart to daily bars and appropriate duration for backtest view
               const needsUpdate = chartStore.barSize !== '1 day' || chartStore.duration !== targetDuration;

@@ -316,9 +316,18 @@ export const useChartStore = create(
               params: { color: '#089981' }
             };
 
+            // Hide previous strategy indicators (so only the new one is visible)
+            // User can still toggle them back on to compare strategies
             set((state) => ({
-              indicators: [...state.indicators, newIndicator]
+              indicators: [
+                ...state.indicators.map(ind =>
+                  ind.type === 'strategy' ? { ...ind, visible: false } : ind
+                ),
+                newIndicator
+              ]
             }));
+
+            console.log(`[CHART STORE] Created new strategy indicator: ${strategyName} (${codeHash}), hiding ${indicators.filter(i => i.type === 'strategy').length} previous strategies`);
           }
 
           // Create linked indicators for non-overlay indicators

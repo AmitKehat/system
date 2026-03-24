@@ -834,6 +834,62 @@ export default function ChartContainer() {
       }
   }, [strategyIndicators, displayBars, symbol, barSize, selectedTradeIndex, updateMarkersWithHighlight]);
 
+  // --- AUTO-EXPAND CHART DATA IF TRADES ARE OUTSIDE RANGE ---
+  useEffect(() => {
+      if (!displayBars || displayBars.length === 0) return;
+      if (!strategyIndicators || strategyIndicators.length === 0) return;
+
+      // Find the earliest trade time across all strategy indicators
+      let earliestTradeTime = Infinity;
+      let hasTradesOutsideRange = false;
+
+      for (const stratInd of strategyIndicators) {
+          if (stratInd.visible === false) continue;
+          if (stratInd.symbol && stratInd.symbol.toUpperCase() !== symbol.toUpperCase()) continue;
+          if (!stratInd.trades || stratInd.trades.length === 0) continue;
+
+          for (const trade of stratInd.trades) {
+              if (trade.time && trade.time < earliestTradeTime) {
+                  earliestTradeTime = trade.time;
+              }
+          }
+      }
+
+      if (earliestTradeTime === Infinity) return;
+
+      // Get earliest bar time
+      const earliestBarTime = displayBars[0].time;
+
+      // Check if earliest trade is before earliest bar (with 1 day buffer)
+      if (earliestTradeTime < earliestBarTime - 86400) {
+          hasTradesOutsideRange = true;
+          const daysOutside = Math.ceil((earliestBarTime - earliestTradeTime) / 86400);
+          console.warn(`[CHART] Trades are ${daysOutside} days before chart data starts. Auto-expanding...`);
+
+          // Calculate required duration from today to earliest trade
+          const today = Math.floor(Date.now() / 1000);
+          const daysFromTodayToTrade = Math.ceil((today - earliestTradeTime) / 86400);
+          const requiredDays = daysFromTodayToTrade + 30; // Buffer
+
+          // Determine target duration
+          let targetDuration = '1 Y';
+          if (requiredDays <= 7) targetDuration = '1 W';
+          else if (requiredDays <= 30) targetDuration = '1 M';
+          else if (requiredDays <= 90) targetDuration = '3 M';
+          else if (requiredDays <= 180) targetDuration = '6 M';
+          else if (requiredDays <= 365) targetDuration = '1 Y';
+          else if (requiredDays <= 730) targetDuration = '2 Y';
+          else if (requiredDays <= 1825) targetDuration = '5 Y';
+          else targetDuration = '10 Y';
+
+          const chartStore = useChartStore.getState();
+          if (chartStore.duration !== targetDuration) {
+              console.log(`[CHART] Expanding duration from ${chartStore.duration} to ${targetDuration}`);
+              chartStore.setDuration(targetDuration);
+          }
+      }
+  }, [strategyIndicators, displayBars, symbol]);
+
   useEffect(() => {
     if (!mainChartRef.current) return;
     const candleSeries = mainSeriesRef.current.get('candles');

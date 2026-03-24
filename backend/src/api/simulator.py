@@ -522,14 +522,43 @@ CRITICAL RULES:
         print(f"[SIMULATOR DEBUG] Found Python code in response, length: {len(strategy_code)}")
 
     # If user approved but LLM didn't output code, try to find code in history
+    # IMPORTANT: Only use code that belongs to the CURRENT strategy, not old strategies
     if not strategy_code and is_approval(req.prompt):
         print(f"[SIMULATOR DEBUG] User approved but no code in response. Searching history...")
-        for msg in reversed(req.chat_history):
+
+        # First, find the index of the most recent strategy summary (JSON block)
+        most_recent_json_idx = -1
+        most_recent_strategy_name = None
+        for i, msg in enumerate(reversed(req.chat_history)):
+            json_hist_match = re.search(json_pattern, msg.content, re.DOTALL)
+            if json_hist_match:
+                try:
+                    hist_params = json.loads(json_hist_match.group(1).strip())
+                    if "strategyName" in hist_params:
+                        most_recent_json_idx = len(req.chat_history) - 1 - i
+                        most_recent_strategy_name = hist_params.get("strategyName")
+                        print(f"[SIMULATOR DEBUG] Most recent strategy summary at idx {most_recent_json_idx}: {most_recent_strategy_name}")
+                        break
+                except:
+                    pass
+
+        # Now search for code, but ONLY use it if it appears AFTER the most recent strategy summary
+        # OR if there's no strategy summary (legacy behavior)
+        for i, msg in enumerate(reversed(req.chat_history)):
+            msg_idx = len(req.chat_history) - 1 - i
             prev_match = re.search(python_pattern, msg.content, re.DOTALL)
             if prev_match:
-                strategy_code = prev_match.group(1).strip()
-                print(f"[SIMULATOR DEBUG] Found code in history, length: {len(strategy_code)}")
-                break
+                # Check if this code is from a previous (different) strategy
+                if most_recent_json_idx != -1 and msg_idx < most_recent_json_idx:
+                    print(f"[SIMULATOR DEBUG] Found code at idx {msg_idx}, but it's BEFORE the most recent strategy summary at idx {most_recent_json_idx}")
+                    print(f"[SIMULATOR DEBUG] This is old code from a previous strategy - NOT using it")
+                    print(f"[SIMULATOR DEBUG] LLM needs to generate new code for: {most_recent_strategy_name}")
+                    # Don't use this old code - let the LLM generate new code
+                    break
+                else:
+                    strategy_code = prev_match.group(1).strip()
+                    print(f"[SIMULATOR DEBUG] Found code in history at idx {msg_idx}, length: {len(strategy_code)}")
+                    break
 
     # If we have code, we need to determine the correct symbol
     # PRIORITY ORDER (user's current request ALWAYS takes precedence):
@@ -596,6 +625,25 @@ CRITICAL RULES:
     # If no code, return as chat reply (conversation continues)
     if not strategy_code:
         print(f"[SIMULATOR DEBUG] No strategy code - returning chat_reply")
+
+        # Special case: user approved but no code was found for the new strategy
+        # This happens when user changed strategy but LLM didn't generate new code
+        if is_approval(req.prompt) and param_update and param_update.get("strategyName"):
+            strategy_name = param_update.get("strategyName", "the new strategy")
+            retry_message = f"""I apologize, but I need to generate the code for **{strategy_name}**. Let me do that now.
+
+```json
+{json.dumps(param_update, indent=2)}
+```
+
+Please say "yes" or "run it" to execute this strategy, or let me know if you'd like any modifications."""
+
+            return {
+                "status": "chat_reply",
+                "message": retry_message,
+                "param_update": param_update
+            }
+
         return {
             "status": "chat_reply",
             "message": llm_response,
