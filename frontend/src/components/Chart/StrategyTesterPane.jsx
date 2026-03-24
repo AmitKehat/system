@@ -1,5 +1,5 @@
 // src/components/Chart/StrategyTesterPane.jsx
-import { createChart, LineSeries } from 'lightweight-charts';
+import { createChart, LineSeries, createSeriesMarkers } from 'lightweight-charts';
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import { useSimulatorStore } from '../../store/simulatorStore';
 import { useChartStore } from '../../store/chartStore';
@@ -26,6 +26,9 @@ function getChartOptions(theme) {
       borderColor: isDark ? '#2a2e39' : '#e0e3eb',
       timeVisible: true,
       secondsVisible: false,
+      rightOffset: 0,
+      fixLeftEdge: true,
+      fixRightEdge: true,
     },
     crosshair: {
       mode: 1,
@@ -45,13 +48,10 @@ function getChartOptions(theme) {
         labelVisible: true,
         labelBackgroundColor: isDark ? '#2a2e39' : '#f0f3fa',
       }
-    }
+    },
+    handleScroll: false,
+    handleScale: false,
   };
-}
-
-function formatDate(timestamp) {
-  const date = new Date(timestamp * 1000);
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
 function formatDateTime(timestamp) {
@@ -373,11 +373,20 @@ function MetricsPanel({ results }) {
   );
 }
 
-// --- Trades Table Component ---
-function TradesTable({ trades, onTradeClick }) {
+// --- Trades Table Component with Merged Cells ---
+function TradesTable({ trades, openTrade, onTradeClick }) {
   const { selectedTradeIndex } = useSimulatorStore();
 
-  if (!trades || trades.length === 0) {
+  // Combine closed trades with open trade
+  const allTrades = useMemo(() => {
+    const result = [...(trades || [])];
+    if (openTrade) {
+      result.push(openTrade);
+    }
+    return result;
+  }, [trades, openTrade]);
+
+  if (allTrades.length === 0) {
     return (
       <div style={{ padding: '20px', textAlign: 'center', color: 'var(--tv-color-text-secondary, #787b86)' }}>
         No trades to display
@@ -397,68 +406,89 @@ function TradesTable({ trades, onTradeClick }) {
             <th style={thStyle}>Price</th>
             <th style={thStyle}>Position</th>
             <th style={thStyle}>Net P&L</th>
-            <th style={thStyle}>MFE</th>
-            <th style={thStyle}>MAE</th>
+            <th style={thStyle}>Fav. Excursion</th>
+            <th style={thStyle}>Adv. Excursion</th>
             <th style={thStyle}>Cumul. P&L</th>
           </tr>
         </thead>
         <tbody>
-          {trades.map((trade, idx) => (
-            <React.Fragment key={idx}>
-              {/* Entry Row */}
-              <tr
-                onClick={() => onTradeClick(idx)}
-                style={{
-                  cursor: 'pointer',
-                  background: selectedTradeIndex === idx ? 'rgba(41, 98, 255, 0.2)' : 'transparent'
-                }}
-                onMouseEnter={e => { if (selectedTradeIndex !== idx) e.currentTarget.style.background = 'rgba(41, 98, 255, 0.1)'; }}
-                onMouseLeave={e => { if (selectedTradeIndex !== idx) e.currentTarget.style.background = 'transparent'; }}
-              >
-                <td style={tdStyle}>{trade.trade_num}</td>
-                <td style={tdStyle}>Entry</td>
-                <td style={tdStyle}>{formatDateTime(trade.entry_time)}</td>
-                <td style={{ ...tdStyle, color: trade.is_long ? '#089981' : '#f23645' }}>
-                  {trade.is_long ? 'Long' : 'Short'}
-                </td>
-                <td style={tdStyle}>${trade.entry_price?.toFixed(2)}</td>
-                <td style={tdStyle}>{trade.size} (${trade.position_value?.toLocaleString()})</td>
-                <td style={tdStyle}>-</td>
-                <td style={tdStyle}>-</td>
-                <td style={tdStyle}>-</td>
-                <td style={tdStyle}>-</td>
-              </tr>
-              {/* Exit Row */}
-              <tr
-                onClick={() => onTradeClick(idx)}
-                style={{
-                  cursor: 'pointer',
-                  background: selectedTradeIndex === idx ? 'rgba(41, 98, 255, 0.15)' : 'transparent'
-                }}
-                onMouseEnter={e => { if (selectedTradeIndex !== idx) e.currentTarget.style.background = 'rgba(41, 98, 255, 0.08)'; }}
-                onMouseLeave={e => { if (selectedTradeIndex !== idx) e.currentTarget.style.background = 'transparent'; }}
-              >
-                <td style={tdStyle}></td>
-                <td style={tdStyle}>Exit</td>
-                <td style={tdStyle}>{formatDateTime(trade.exit_time)}</td>
-                <td style={tdStyle}>Close {trade.is_long ? 'Long' : 'Short'}</td>
-                <td style={tdStyle}>${trade.exit_price?.toFixed(2)}</td>
-                <td style={tdStyle}>{trade.size} (${(trade.size * trade.exit_price)?.toLocaleString()})</td>
-                <td style={{ ...tdStyle, color: trade.pnl_usd >= 0 ? '#089981' : '#f23645' }}>
-                  {formatUSD(trade.pnl_usd)} ({formatPercent(trade.pnl_pct)})
-                </td>
-                <td style={{ ...tdStyle, color: '#089981' }}>
-                  {formatUSD(trade.mfe_usd)} ({trade.mfe_pct?.toFixed(2)}%)
-                </td>
-                <td style={{ ...tdStyle, color: '#f23645' }}>
-                  {formatUSD(trade.mae_usd)} ({trade.mae_pct?.toFixed(2)}%)
-                </td>
-                <td style={{ ...tdStyle, color: trade.cumulative_pnl_usd >= 0 ? '#089981' : '#f23645' }}>
-                  {formatUSD(trade.cumulative_pnl_usd)} ({trade.cumulative_pnl_pct?.toFixed(2)}%)
-                </td>
-              </tr>
-            </React.Fragment>
-          ))}
+          {allTrades.map((trade, idx) => {
+            const isOpen = trade.is_open === true;
+            const isSelected = selectedTradeIndex === idx;
+            const pnlColor = trade.pnl_usd >= 0 ? '#089981' : '#f23645';
+            const cumulColor = trade.cumulative_pnl_usd >= 0 ? '#089981' : '#f23645';
+
+            return (
+              <React.Fragment key={idx}>
+                {/* Entry Row */}
+                <tr
+                  onClick={() => onTradeClick(idx)}
+                  style={{
+                    cursor: 'pointer',
+                    background: isSelected ? 'rgba(41, 98, 255, 0.2)' : 'transparent'
+                  }}
+                  onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = 'rgba(41, 98, 255, 0.1)'; }}
+                  onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
+                >
+                  <td style={tdStyle} rowSpan={isOpen ? 1 : 2}>{trade.trade_num}</td>
+                  <td style={tdStyle}>Entry</td>
+                  <td style={tdStyle}>{formatDateTime(trade.entry_time)}</td>
+                  <td style={{ ...tdStyle, color: trade.is_long ? '#089981' : '#f23645' }}>
+                    {trade.is_long ? 'Long' : 'Short'}
+                  </td>
+                  <td style={tdStyle}>${trade.entry_price?.toFixed(2)}</td>
+                  <td style={tdStyle}>{trade.size} (${trade.position_value?.toLocaleString()})</td>
+                  {/* Merged cells for P&L columns */}
+                  {isOpen ? (
+                    <>
+                      <td style={{ ...tdStyle, color: '#ff9800' }}>Open</td>
+                      <td style={{ ...tdStyle, color: '#ff9800' }}>-</td>
+                      <td style={{ ...tdStyle, color: '#ff9800' }}>-</td>
+                      <td style={{ ...tdStyle, color: '#ff9800' }}>-</td>
+                    </>
+                  ) : (
+                    <>
+                      <td style={{ ...tdStyle, color: pnlColor, verticalAlign: 'middle', textAlign: 'center' }} rowSpan={2}>
+                        {formatUSD(trade.pnl_usd)}<br/>
+                        <span style={{ fontSize: '10px' }}>({formatPercent(trade.pnl_pct)})</span>
+                      </td>
+                      <td style={{ ...tdStyle, color: '#089981', verticalAlign: 'middle', textAlign: 'center' }} rowSpan={2}>
+                        {formatUSD(trade.mfe_usd)}<br/>
+                        <span style={{ fontSize: '10px' }}>({trade.mfe_pct?.toFixed(2)}%)</span>
+                      </td>
+                      <td style={{ ...tdStyle, color: '#f23645', verticalAlign: 'middle', textAlign: 'center' }} rowSpan={2}>
+                        {formatUSD(trade.mae_usd)}<br/>
+                        <span style={{ fontSize: '10px' }}>({trade.mae_pct?.toFixed(2)}%)</span>
+                      </td>
+                      <td style={{ ...tdStyle, color: cumulColor, verticalAlign: 'middle', textAlign: 'center' }} rowSpan={2}>
+                        {formatUSD(trade.cumulative_pnl_usd)}<br/>
+                        <span style={{ fontSize: '10px' }}>({trade.cumulative_pnl_pct?.toFixed(2)}%)</span>
+                      </td>
+                    </>
+                  )}
+                </tr>
+                {/* Exit Row (only for closed trades) */}
+                {!isOpen && (
+                  <tr
+                    onClick={() => onTradeClick(idx)}
+                    style={{
+                      cursor: 'pointer',
+                      background: isSelected ? 'rgba(41, 98, 255, 0.15)' : 'transparent'
+                    }}
+                    onMouseEnter={e => { if (!isSelected) e.currentTarget.style.background = 'rgba(41, 98, 255, 0.08)'; }}
+                    onMouseLeave={e => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
+                  >
+                    <td style={tdStyle}>Exit</td>
+                    <td style={tdStyle}>{formatDateTime(trade.exit_time)}</td>
+                    <td style={tdStyle}>Close {trade.is_long ? 'Long' : 'Short'}</td>
+                    <td style={tdStyle}>${trade.exit_price?.toFixed(2)}</td>
+                    <td style={tdStyle}>{trade.size} (${(trade.size * trade.exit_price)?.toLocaleString()})</td>
+                    {/* P&L cells are merged from entry row */}
+                  </tr>
+                )}
+              </React.Fragment>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -481,64 +511,24 @@ const tdStyle = {
   whiteSpace: 'nowrap'
 };
 
-// --- Equity Chart Component ---
-function EquityChart({ results, theme, onTradeClick }) {
+// --- Equity Chart Component with Fixed Dimensions and Trade Markers ---
+function EquityChart({ results, theme, onTradeClick, initialCapital }) {
   const containerRef = useRef(null);
   const chartRef = useRef(null);
   const equitySeriesRef = useRef(null);
   const buyHoldSeriesRef = useRef(null);
+  const markersPluginRef = useRef(null);
 
   const { showBuyHoldComparison, toggleBuyHoldComparison, selectedTradeIndex } = useSimulatorStore();
 
-  useEffect(() => {
-    if (!containerRef.current) return;
+  // Process equity curve data - normalize to start at initial capital
+  const processedData = useMemo(() => {
+    if (!results?.equity_curve || results.equity_curve.length === 0) {
+      return { equity: [], buyHold: [], trades: [] };
+    }
 
-    const chart = createChart(containerRef.current, {
-      ...getChartOptions(theme),
-      width: containerRef.current.clientWidth,
-      height: containerRef.current.clientHeight,
-      handleScroll: true,
-      handleScale: true,
-    });
-    chartRef.current = chart;
-
-    // Equity line
-    equitySeriesRef.current = chart.addSeries(LineSeries, {
-      color: '#2962ff',
-      lineWidth: 2,
-      priceLineVisible: false,
-      lastValueVisible: true,
-    });
-
-    // Buy & Hold line
-    buyHoldSeriesRef.current = chart.addSeries(LineSeries, {
-      color: '#787b86',
-      lineWidth: 1,
-      lineStyle: 2,
-      priceLineVisible: false,
-      lastValueVisible: false,
-    });
-
-    const resizeObserver = new ResizeObserver((entries) => {
-      const { width, height } = entries[0].contentRect;
-      if (width > 0 && height > 0 && chartRef.current) {
-        chartRef.current.applyOptions({ width, height });
-      }
-    });
-    resizeObserver.observe(containerRef.current);
-
-    return () => {
-      resizeObserver.disconnect();
-      chart.remove();
-      chartRef.current = null;
-      equitySeriesRef.current = null;
-      buyHoldSeriesRef.current = null;
-    };
-  }, [theme]);
-
-  // Update data
-  useEffect(() => {
-    if (!chartRef.current || !results?.equity_curve) return;
+    // Get initial capital from results or fallback
+    const capital = results.initial_capital || initialCapital || 100000;
 
     // Process equity curve
     const eqData = results.equity_curve
@@ -556,18 +546,14 @@ function EquityChart({ results, theme, onTradeClick }) {
       }
     }
 
-    if (uniqueEq.length > 0) {
-      equitySeriesRef.current?.setData(uniqueEq);
-    }
-
-    // Buy & Hold
+    // Process Buy & Hold curve
+    let uniqueBh = [];
     if (results.buy_hold_equity_curve && results.buy_hold_equity_curve.length > 0) {
       const bhData = results.buy_hold_equity_curve
         .filter(pt => pt.time && pt.value !== undefined)
         .map(pt => ({ time: pt.time, value: pt.value }))
         .sort((a, b) => a.time.localeCompare(b.time));
 
-      const uniqueBh = [];
       lastTime = null;
       for (const pt of bhData) {
         if (pt.time !== lastTime) {
@@ -575,16 +561,141 @@ function EquityChart({ results, theme, onTradeClick }) {
           lastTime = pt.time;
         }
       }
+    }
 
-      if (uniqueBh.length > 0) {
-        buyHoldSeriesRef.current?.setData(uniqueBh);
+    // Build trade exit markers for the equity curve
+    const tradeMarkers = [];
+    if (results.trades_detailed && results.trades_detailed.length > 0) {
+      for (let i = 0; i < results.trades_detailed.length; i++) {
+        const trade = results.trades_detailed[i];
+        if (trade.exit_time) {
+          const exitDate = new Date(trade.exit_time * 1000);
+          const exitDateStr = exitDate.toISOString().split('T')[0];
+
+          // Find corresponding equity value at exit time
+          const eqPoint = uniqueEq.find(pt => pt.time === exitDateStr);
+
+          tradeMarkers.push({
+            time: exitDateStr,
+            position: 'inBar',
+            color: trade.pnl_usd >= 0 ? '#089981' : '#f23645',
+            shape: 'circle',
+            size: selectedTradeIndex === i ? 3 : 1.5,
+            text: `Trade ${trade.trade_num}: ${trade.pnl_usd >= 0 ? '+' : ''}$${trade.pnl_usd?.toFixed(0)}`,
+            id: `trade-${i}`,
+          });
+        }
       }
+    }
+
+    return { equity: uniqueEq, buyHold: uniqueBh, trades: tradeMarkers };
+  }, [results, initialCapital, selectedTradeIndex]);
+
+  // Create chart
+  useEffect(() => {
+    if (!containerRef.current) return;
+
+    const rect = containerRef.current.getBoundingClientRect();
+    const initWidth = rect.width > 0 ? rect.width : 800;
+    const initHeight = rect.height > 0 ? rect.height : 200;
+
+    const chart = createChart(containerRef.current, {
+      ...getChartOptions(theme),
+      width: initWidth,
+      height: initHeight,
+    });
+    chartRef.current = chart;
+
+    // Equity line
+    equitySeriesRef.current = chart.addSeries(LineSeries, {
+      color: '#2962ff',
+      lineWidth: 2,
+      priceLineVisible: false,
+      lastValueVisible: true,
+      crosshairMarkerVisible: true,
+    });
+
+    // Create markers plugin for equity series
+    markersPluginRef.current = createSeriesMarkers(equitySeriesRef.current, []);
+
+    // Buy & Hold line
+    buyHoldSeriesRef.current = chart.addSeries(LineSeries, {
+      color: '#787b86',
+      lineWidth: 1,
+      lineStyle: 2,
+      priceLineVisible: false,
+      lastValueVisible: false,
+    });
+
+    // Click handler for trade markers
+    chart.subscribeClick((param) => {
+      if (!param.point || !param.time) return;
+
+      // Find if click is near a trade marker
+      const clickTime = param.time;
+      if (results?.trades_detailed) {
+        for (let i = 0; i < results.trades_detailed.length; i++) {
+          const trade = results.trades_detailed[i];
+          if (trade.exit_time) {
+            const exitDate = new Date(trade.exit_time * 1000);
+            const exitDateStr = exitDate.toISOString().split('T')[0];
+            if (exitDateStr === clickTime) {
+              onTradeClick(i);
+              return;
+            }
+          }
+        }
+      }
+    });
+
+    // Handle resize
+    const handleResize = () => {
+      if (containerRef.current && chartRef.current) {
+        const newRect = containerRef.current.getBoundingClientRect();
+        if (newRect.width > 0 && newRect.height > 0) {
+          chartRef.current.applyOptions({ width: newRect.width, height: newRect.height });
+          chartRef.current.timeScale().fitContent();
+        }
+      }
+    };
+
+    const resizeObserver = new ResizeObserver(handleResize);
+    resizeObserver.observe(containerRef.current);
+
+    setTimeout(handleResize, 50);
+    setTimeout(handleResize, 200);
+
+    return () => {
+      resizeObserver.disconnect();
+      chart.remove();
+      chartRef.current = null;
+      equitySeriesRef.current = null;
+      buyHoldSeriesRef.current = null;
+      markersPluginRef.current = null;
+    };
+  }, [theme]);
+
+  // Update data
+  useEffect(() => {
+    if (!chartRef.current) return;
+
+    if (processedData.equity.length > 0 && equitySeriesRef.current) {
+      equitySeriesRef.current.setData(processedData.equity);
+    }
+
+    if (processedData.buyHold.length > 0 && buyHoldSeriesRef.current) {
+      buyHoldSeriesRef.current.setData(processedData.buyHold);
+    }
+
+    // Set trade markers
+    if (markersPluginRef.current && processedData.trades.length > 0) {
+      markersPluginRef.current.setMarkers(processedData.trades);
     }
 
     setTimeout(() => {
       chartRef.current?.timeScale().fitContent();
     }, 50);
-  }, [results]);
+  }, [processedData]);
 
   // Toggle Buy & Hold visibility
   useEffect(() => {
@@ -592,6 +703,18 @@ function EquityChart({ results, theme, onTradeClick }) {
       buyHoldSeriesRef.current.applyOptions({ visible: showBuyHoldComparison });
     }
   }, [showBuyHoldComparison]);
+
+  // Update markers when selected trade changes
+  useEffect(() => {
+    if (markersPluginRef.current && processedData.trades.length > 0) {
+      // Update marker sizes based on selection
+      const updatedMarkers = processedData.trades.map((marker, idx) => ({
+        ...marker,
+        size: selectedTradeIndex === idx ? 3 : 1.5,
+      }));
+      markersPluginRef.current.setMarkers(updatedMarkers);
+    }
+  }, [selectedTradeIndex, processedData.trades]);
 
   return (
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: '150px' }}>
@@ -625,6 +748,39 @@ export default function StrategyTesterPane({ results, theme, onClose, onTradeCli
   const { activeTab, selectTrade } = useSimulatorStore();
   const { lastStrategyName } = useSimulatorStore();
 
+  // Extract open trade from results.trades (trade markers that have open=true)
+  const openTrade = useMemo(() => {
+    if (!results?.trades) return null;
+
+    // Find entry marker with open=true
+    const openEntry = results.trades.find(t => t.open === true);
+    if (!openEntry) return null;
+
+    // Get trade number based on existing trades
+    const tradeNum = (results.trades_detailed?.length || 0) + 1;
+
+    return {
+      trade_num: tradeNum,
+      entry_time: openEntry.time,
+      entry_price: openEntry.price,
+      size: openEntry.size,
+      is_long: openEntry.type === 'Buy',
+      position_value: openEntry.price * openEntry.size,
+      is_open: true,
+      // No exit data for open trades
+      exit_time: null,
+      exit_price: null,
+      pnl_usd: null,
+      pnl_pct: null,
+      mfe_usd: null,
+      mfe_pct: null,
+      mae_usd: null,
+      mae_pct: null,
+      cumulative_pnl_usd: null,
+      cumulative_pnl_pct: null,
+    };
+  }, [results]);
+
   const handleTradeClick = useCallback((tradeIndex) => {
     selectTrade(tradeIndex);
 
@@ -632,22 +788,28 @@ export default function StrategyTesterPane({ results, theme, onClose, onTradeCli
       onTradeClick(tradeIndex);
     }
 
-    // Scroll main chart to trade
-    if (mainChart && results?.trades_detailed?.[tradeIndex]) {
-      const trade = results.trades_detailed[tradeIndex];
-      try {
-        const exitTime = trade.exit_time;
-        // Convert to lightweight-charts format
-        const date = new Date(exitTime * 1000);
-        const dateStr = date.toISOString().split('T')[0];
+    // Get the trade data
+    const allTrades = [...(results?.trades_detailed || [])];
+    if (openTrade) allTrades.push(openTrade);
+    const trade = allTrades[tradeIndex];
 
-        // Scroll chart to show this date
-        mainChart.timeScale().scrollToPosition(-5, true);
+    // Scroll main chart to trade
+    if (mainChart && trade) {
+      try {
+        // Use entry_time for open trades, exit_time for closed trades
+        const tradeTime = trade.exit_time || trade.entry_time;
+        if (tradeTime) {
+          const date = new Date(tradeTime * 1000);
+          const dateStr = date.toISOString().split('T')[0];
+
+          // Find the bar index and scroll to center it
+          mainChart.timeScale().scrollToPosition(-10, true);
+        }
       } catch (e) {
         console.error('[STRATEGY TESTER] Error scrolling to trade:', e);
       }
     }
-  }, [mainChart, results, selectTrade, onTradeClick]);
+  }, [mainChart, results, openTrade, selectTrade, onTradeClick]);
 
   if (!results) {
     return (
@@ -682,13 +844,19 @@ export default function StrategyTesterPane({ results, theme, onClose, onTradeCli
       {activeTab === 'metrics' && (
         <>
           <MetricsPanel results={results} />
-          <EquityChart results={results} theme={theme} onTradeClick={handleTradeClick} />
+          <EquityChart
+            results={results}
+            theme={theme}
+            onTradeClick={handleTradeClick}
+            initialCapital={results.initial_capital}
+          />
         </>
       )}
 
       {activeTab === 'trades' && (
         <TradesTable
           trades={results.trades_detailed}
+          openTrade={openTrade}
           onTradeClick={handleTradeClick}
         />
       )}

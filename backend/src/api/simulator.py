@@ -787,9 +787,18 @@ def RSI(values, n):
             # Filter equity curve to actual start date (exclude warmup)
             if warmup_days > 0:
                 eq_df = eq_df[eq_df.index >= actual_start_date]
-            for dt, row in eq_df.iterrows():
-                date_str = dt.strftime('%Y-%m-%d')
-                equity_data.append({"time": date_str, "value": safe_float(row['Equity'])})
+
+            # IMPORTANT: Normalize equity curve to start at initial capital
+            # The backtest might have executed trades during warmup that affected equity
+            # We need to reset the equity curve to start fresh from initial capital
+            if not eq_df.empty:
+                first_equity_value = float(eq_df.iloc[0]['Equity'])
+                equity_offset = cash - first_equity_value  # Offset to normalize to initial capital
+
+                for dt, row in eq_df.iterrows():
+                    date_str = dt.strftime('%Y-%m-%d')
+                    normalized_value = float(row['Equity']) + equity_offset
+                    equity_data.append({"time": date_str, "value": safe_float(normalized_value)})
 
         unique_equity = []
         last_t = None
@@ -1064,9 +1073,16 @@ def RSI(values, n):
             eq_df = stats['_equity_curve']
             if warmup_days > 0:
                 eq_df = eq_df[eq_df.index >= actual_start_date]
-            for dt, row in eq_df.iterrows():
-                date_str = dt.strftime('%Y-%m-%d')
-                equity_data.append({"time": date_str, "value": safe_float(row['Equity'])})
+
+            # IMPORTANT: Normalize equity curve to start at initial capital
+            if not eq_df.empty:
+                first_equity_value = float(eq_df.iloc[0]['Equity'])
+                equity_offset = cash - first_equity_value
+
+                for dt, row in eq_df.iterrows():
+                    date_str = dt.strftime('%Y-%m-%d')
+                    normalized_value = float(row['Equity']) + equity_offset
+                    equity_data.append({"time": date_str, "value": safe_float(normalized_value)})
 
         # Deduplicate equity
         unique_equity = []
