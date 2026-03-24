@@ -564,12 +564,13 @@ function EquityChart({ results, theme, onTradeClick, initialCapital }) {
     }
 
     // Build trade markers for BOTH entry and exit points on the equity curve
+    // Use circles (not arrows) that are clickable
     const tradeMarkers = [];
     if (results.trades_detailed && results.trades_detailed.length > 0) {
       for (let i = 0; i < results.trades_detailed.length; i++) {
         const trade = results.trades_detailed[i];
 
-        // Entry marker
+        // Entry marker - circle
         if (trade.entry_time) {
           const entryDate = new Date(trade.entry_time * 1000);
           const entryDateStr = entryDate.toISOString().split('T')[0];
@@ -578,14 +579,14 @@ function EquityChart({ results, theme, onTradeClick, initialCapital }) {
             time: entryDateStr,
             position: 'inBar',
             color: trade.is_long ? '#089981' : '#f23645', // Green for long entry, red for short entry
-            shape: 'arrowUp',
-            size: selectedTradeIndex === i ? 2.5 : 1.5,
-            text: `#${trade.trade_num} ${trade.is_long ? 'Long' : 'Short'} @ $${trade.entry_price?.toFixed(2)}`,
+            shape: 'circle',
+            size: selectedTradeIndex === i ? 3 : 2,
+            text: `#${trade.trade_num} ${trade.is_long ? 'Buy' : 'Sell'} @ $${trade.entry_price?.toFixed(2)}`,
             id: `trade-${i}-entry`,
           });
         }
 
-        // Exit marker (only for closed trades)
+        // Exit marker - circle (only for closed trades)
         if (trade.exit_time) {
           const exitDate = new Date(trade.exit_time * 1000);
           const exitDateStr = exitDate.toISOString().split('T')[0];
@@ -594,9 +595,9 @@ function EquityChart({ results, theme, onTradeClick, initialCapital }) {
             time: exitDateStr,
             position: 'inBar',
             color: trade.pnl_usd >= 0 ? '#089981' : '#f23645',
-            shape: 'arrowDown',
-            size: selectedTradeIndex === i ? 2.5 : 1.5,
-            text: `#${trade.trade_num} Exit: ${trade.pnl_usd >= 0 ? '+' : ''}$${trade.pnl_usd?.toFixed(0)}`,
+            shape: 'circle',
+            size: selectedTradeIndex === i ? 3 : 2,
+            text: `#${trade.trade_num} Close: ${trade.pnl_usd >= 0 ? '+' : ''}$${trade.pnl_usd?.toFixed(0)}`,
             id: `trade-${i}-exit`,
           });
         }
@@ -614,8 +615,8 @@ function EquityChart({ results, theme, onTradeClick, initialCapital }) {
           time: entryDateStr,
           position: 'inBar',
           color: '#ff9800', // Orange for open position
-          shape: 'arrowUp',
-          size: 2,
+          shape: 'circle',
+          size: 2.5,
           text: `Open ${openEntry.type === 'Buy' ? 'Long' : 'Short'} @ $${openEntry.price?.toFixed(2)}`,
           id: 'open-position',
         });
