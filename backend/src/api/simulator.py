@@ -418,9 +418,12 @@ STEP 2 - PRESENT SUMMARY FOR APPROVAL:
 IMPORTANT: The JSON block MUST come BEFORE the HTML summary. Always include the symbol in the JSON block.
 
 STEP 3 - EXECUTE ON APPROVAL:
-- When the user approves (says "yes", "ok", "go ahead", "run it", etc.), output the Python code
+- When the user approves (says "yes", "ok", "go ahead", "run it", etc.), GENERATE and output the Python code
+- CRITICAL: You MUST generate FRESH code that implements the strategy from the MOST RECENT summary you presented
+- Do NOT copy or reuse code from earlier in the conversation - the strategy may have changed!
+- If the user modified the strategy (changed indicator, period, rules, etc.), your new code MUST reflect those changes
 - Output ONLY the CustomStrategy class wrapped in {triple_ticks}python ... {triple_ticks}
-- DO NOT output the summary again, just the code
+- DO NOT output the summary again, just the newly generated code
 
 CRITICAL RULES:
 
@@ -437,6 +440,9 @@ CRITICAL RULES:
 3. STRATEGY MODIFICATIONS:
    - If the user wants to change the strategy after seeing the summary, update and show a NEW summary
    - If the user wants to change parameters (symbol, dates, etc.), show a NEW summary with updated values
+   - CRITICAL: When presenting a new strategy summary, treat it as a COMPLETELY NEW STRATEGY
+   - Any previous code in the conversation is OBSOLETE and must NOT be reused
+   - When user approves the new summary, generate ENTIRELY NEW code matching the new strategy
    - ALWAYS require approval before outputting code
 
 4. CODING RULES:
@@ -447,6 +453,10 @@ CRITICAL RULES:
    - Extract datetime: current_dt = self.data.index[-1]
    - Handle weekends with range checks: if 1 <= current_dt.day <= 3 (not if current_dt.day == 2)
    - For monthly recurring: track state with (year, month) tuples
+   - VERIFICATION: Before outputting code, VERIFY it matches the CURRENT strategy:
+     * If current strategy uses SMA(50), the code MUST use SMA(..., 50), NOT EMA or any other indicator
+     * If current strategy uses EMA(150), the code MUST use EMA(..., 150)
+     * The indicator in the code MUST match the indicator in your most recent JSON summary
 
 5. INDICATOR LISTING:
    - In the JSON block, list ALL technical indicators your strategy uses
@@ -492,6 +502,14 @@ CRITICAL RULES:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"LLM API Error: {str(e)}")
 
+    # DEBUG: Print LLM response summary
+    print(f"[SIMULATOR DEBUG] ========== LLM RESPONSE ==========")
+    print(f"[SIMULATOR DEBUG] User prompt: '{req.prompt}'")
+    print(f"[SIMULATOR DEBUG] Is approval: {is_approval(req.prompt)}")
+    print(f"[SIMULATOR DEBUG] Response length: {len(llm_response)}")
+    print(f"[SIMULATOR DEBUG] Response first 500 chars: {llm_response[:500]}")
+    print(f"[SIMULATOR DEBUG] ===================================")
+
     # Extract parameter updates (JSON block)
     param_update = None
     json_pattern = triple_ticks + r'json(.*?)' + triple_ticks
@@ -500,7 +518,7 @@ CRITICAL RULES:
     if json_match:
         try:
             param_update = json.loads(json_match.group(1).strip())
-            print(f"[SIMULATOR DEBUG] Extracted param_update: {param_update}")
+            print(f"[SIMULATOR DEBUG] Extracted param_update from LLM response: {param_update}")
 
             # Update symbol if provided
             if "symbol" in param_update:
@@ -511,6 +529,8 @@ CRITICAL RULES:
             # The frontend will hide it from display
         except Exception as e:
             print(f"[SIMULATOR DEBUG] Failed to parse JSON: {e}")
+    else:
+        print(f"[SIMULATOR DEBUG] No JSON block found in LLM response")
 
     # Extract Python code
     python_pattern = triple_ticks + r'python(.*?)' + triple_ticks
@@ -519,28 +539,45 @@ CRITICAL RULES:
     strategy_code = None
     if code_match:
         strategy_code = code_match.group(1).strip()
-        print(f"[SIMULATOR DEBUG] Found Python code in response, length: {len(strategy_code)}")
+        # DEBUG: Print code snippet to see what strategy it is
+        code_preview = strategy_code[:300] if len(strategy_code) > 300 else strategy_code
+        print(f"[SIMULATOR DEBUG] Found Python code in LLM response, length: {len(strategy_code)}")
+        print(f"[SIMULATOR DEBUG] Code preview: {code_preview}")
+    else:
+        print(f"[SIMULATOR DEBUG] No Python code found in LLM response")
 
     # If user approved but LLM didn't output code, try to find code in history
     # IMPORTANT: Only use code that belongs to the CURRENT strategy, not old strategies
     if not strategy_code and is_approval(req.prompt):
-        print(f"[SIMULATOR DEBUG] User approved but no code in response. Searching history...")
+        print(f"[SIMULATOR DEBUG] ========== HISTORY SEARCH ==========")
+        print(f"[SIMULATOR DEBUG] User approved but no code in LLM response. Searching history...")
+        print(f"[SIMULATOR DEBUG] Chat history length: {len(req.chat_history)}")
 
-        # First, find the index of the most recent strategy summary (JSON block)
+        # DEBUG: Print all messages in history with their indices
+        for i, msg in enumerate(req.chat_history):
+            has_json = '```json' in msg.content
+            has_python = '```python' in msg.content
+            print(f"[SIMULATOR DEBUG] History[{i}] role={msg.role}, has_json={has_json}, has_python={has_python}, content_len={len(msg.content)}")
+
+        # First, find the index of the most recent strategy summary (JSON block with strategyName)
         most_recent_json_idx = -1
         most_recent_strategy_name = None
         for i, msg in enumerate(reversed(req.chat_history)):
+            actual_idx = len(req.chat_history) - 1 - i
             json_hist_match = re.search(json_pattern, msg.content, re.DOTALL)
             if json_hist_match:
                 try:
                     hist_params = json.loads(json_hist_match.group(1).strip())
+                    print(f"[SIMULATOR DEBUG] Found JSON at idx {actual_idx}: {hist_params}")
                     if "strategyName" in hist_params:
-                        most_recent_json_idx = len(req.chat_history) - 1 - i
+                        most_recent_json_idx = actual_idx
                         most_recent_strategy_name = hist_params.get("strategyName")
-                        print(f"[SIMULATOR DEBUG] Most recent strategy summary at idx {most_recent_json_idx}: {most_recent_strategy_name}")
+                        print(f"[SIMULATOR DEBUG] This is the most recent strategy summary: {most_recent_strategy_name}")
                         break
-                except:
-                    pass
+                except Exception as e:
+                    print(f"[SIMULATOR DEBUG] Failed to parse JSON at idx {actual_idx}: {e}")
+
+        print(f"[SIMULATOR DEBUG] Most recent strategy summary idx: {most_recent_json_idx}, name: {most_recent_strategy_name}")
 
         # Now search for code, but ONLY use it if it appears AFTER the most recent strategy summary
         # OR if there's no strategy summary (legacy behavior)
@@ -548,17 +585,24 @@ CRITICAL RULES:
             msg_idx = len(req.chat_history) - 1 - i
             prev_match = re.search(python_pattern, msg.content, re.DOTALL)
             if prev_match:
+                code_found = prev_match.group(1).strip()
+                code_preview = code_found[:200] if len(code_found) > 200 else code_found
+                print(f"[SIMULATOR DEBUG] Found code at idx {msg_idx}, preview: {code_preview[:100]}...")
+
                 # Check if this code is from a previous (different) strategy
                 if most_recent_json_idx != -1 and msg_idx < most_recent_json_idx:
-                    print(f"[SIMULATOR DEBUG] Found code at idx {msg_idx}, but it's BEFORE the most recent strategy summary at idx {most_recent_json_idx}")
-                    print(f"[SIMULATOR DEBUG] This is old code from a previous strategy - NOT using it")
+                    print(f"[SIMULATOR DEBUG] Code at idx {msg_idx} is BEFORE strategy summary at idx {most_recent_json_idx}")
+                    print(f"[SIMULATOR DEBUG] This is OLD code from a previous strategy - NOT using it")
                     print(f"[SIMULATOR DEBUG] LLM needs to generate new code for: {most_recent_strategy_name}")
                     # Don't use this old code - let the LLM generate new code
                     break
                 else:
-                    strategy_code = prev_match.group(1).strip()
-                    print(f"[SIMULATOR DEBUG] Found code in history at idx {msg_idx}, length: {len(strategy_code)}")
+                    strategy_code = code_found
+                    print(f"[SIMULATOR DEBUG] Using code from idx {msg_idx}, length: {len(strategy_code)}")
                     break
+
+        print(f"[SIMULATOR DEBUG] ===================================")
+        print(f"[SIMULATOR DEBUG] Final strategy_code is {'SET' if strategy_code else 'NONE'}")
 
     # If we have code, we need to determine the correct symbol
     # PRIORITY ORDER (user's current request ALWAYS takes precedence):
