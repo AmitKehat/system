@@ -53,6 +53,130 @@ def generate_code_hash(code: str) -> str:
     # Hash the normalized code
     return hashlib.md5(normalized.encode()).hexdigest()[:12]
 
+def calculate_trade_excursions(df, trades_df, initial_cash: float) -> List[Dict]:
+    """Calculate MFE/MAE for each trade using price data between entry/exit.
+    Returns enhanced trade data with excursions and cumulative P&L."""
+    enhanced_trades = []
+    cumulative_pnl = 0.0
+
+    for idx, row in trades_df.iterrows():
+        entry_time = row['EntryTime']
+        exit_time = row['ExitTime']
+        entry_price = float(row['EntryPrice'])
+        exit_price = float(row['ExitPrice'])
+        size = int(row['Size'])
+        pnl = float(row['PnL'])
+        is_long = size > 0
+
+        # Get price data between entry and exit
+        try:
+            trade_prices = df.loc[entry_time:exit_time]
+            if trade_prices.empty:
+                # Fallback if exact times not found
+                trade_prices = df[(df.index >= entry_time) & (df.index <= exit_time)]
+        except:
+            trade_prices = pd.DataFrame()
+
+        # Calculate MFE/MAE
+        if not trade_prices.empty:
+            if is_long:
+                mfe_price = float(trade_prices['High'].max())
+                mae_price = float(trade_prices['Low'].min())
+                mfe_usd = (mfe_price - entry_price) * abs(size)
+                mae_usd = (mae_price - entry_price) * abs(size)  # Will be negative or zero
+            else:
+                mfe_price = float(trade_prices['Low'].min())
+                mae_price = float(trade_prices['High'].max())
+                mfe_usd = (entry_price - mfe_price) * abs(size)
+                mae_usd = (entry_price - mae_price) * abs(size)  # Will be negative or zero
+        else:
+            mfe_usd = max(0, pnl)
+            mae_usd = min(0, pnl)
+
+        position_value = entry_price * abs(size)
+        mfe_pct = (mfe_usd / position_value) * 100 if position_value > 0 else 0
+        mae_pct = (mae_usd / position_value) * 100 if position_value > 0 else 0
+        pnl_pct = (pnl / position_value) * 100 if position_value > 0 else 0
+
+        cumulative_pnl += pnl
+        cumulative_pnl_pct = (cumulative_pnl / initial_cash) * 100
+
+        # Duration in days
+        duration_days = (exit_time - entry_time).days
+
+        enhanced_trades.append({
+            'trade_num': len(enhanced_trades) + 1,
+            'entry_time': int(entry_time.timestamp()),
+            'exit_time': int(exit_time.timestamp()),
+            'entry_price': safe_float(entry_price),
+            'exit_price': safe_float(exit_price),
+            'size': abs(size),
+            'is_long': is_long,
+            'position_value': safe_float(position_value),
+            'pnl_usd': safe_float(pnl),
+            'pnl_pct': safe_float(pnl_pct),
+            'mfe_usd': safe_float(mfe_usd),
+            'mfe_pct': safe_float(mfe_pct),
+            'mae_usd': safe_float(mae_usd),
+            'mae_pct': safe_float(mae_pct),
+            'cumulative_pnl_usd': safe_float(cumulative_pnl),
+            'cumulative_pnl_pct': safe_float(cumulative_pnl_pct),
+            'duration_days': duration_days
+        })
+
+    return enhanced_trades
+
+def calculate_buy_hold(df, initial_capital: float, start_date, end_date) -> tuple:
+    """Calculate Buy & Hold returns for comparison.
+    Returns (return_pct, equity_curve)."""
+    try:
+        # Filter to period
+        if isinstance(start_date, str):
+            start_date = pd.Timestamp(start_date)
+        if isinstance(end_date, str):
+            end_date = pd.Timestamp(end_date)
+
+        period_df = df[(df.index >= start_date) & (df.index <= end_date)]
+        if period_df.empty:
+            return 0.0, []
+
+        first_price = float(period_df['Close'].iloc[0])
+        shares = initial_capital / first_price
+
+        buy_hold_equity = []
+        for dt, row in period_df.iterrows():
+            equity = shares * float(row['Close'])
+            buy_hold_equity.append({
+                "time": dt.strftime('%Y-%m-%d'),
+                "value": safe_float(equity)
+            })
+
+        final_equity = shares * float(period_df['Close'].iloc[-1])
+        return_pct = ((final_equity - initial_capital) / initial_capital) * 100
+
+        return safe_float(return_pct), buy_hold_equity
+    except Exception as e:
+        print(f"[SIMULATOR] Buy & Hold calculation error: {e}")
+        return 0.0, []
+
+def calculate_max_drawdown_usd(equity_curve: List[Dict]) -> float:
+    """Calculate maximum drawdown in USD from equity curve."""
+    if not equity_curve:
+        return 0.0
+
+    peak = 0.0
+    max_dd = 0.0
+
+    for point in equity_curve:
+        value = point.get('value', 0)
+        if value > peak:
+            peak = value
+        dd = peak - value
+        if dd > max_dd:
+            max_dd = dd
+
+    return max_dd
+
 # Indicator type to overlay status mapping
 INDICATOR_OVERLAY_MAP = {
     "sma": True,
@@ -763,6 +887,23 @@ def RSI(values, n):
             param_update = {}
         param_update["symbol"] = req.symbol
 
+        # Calculate enhanced trade data with MFE/MAE
+        trades_detailed = []
+        profitable_count = 0
+        losing_count = 0
+        if not trades_df.empty:
+            trades_detailed = calculate_trade_excursions(df, trades_df, cash)
+            profitable_count = sum(1 for t in trades_detailed if t['pnl_usd'] > 0)
+            losing_count = sum(1 for t in trades_detailed if t['pnl_usd'] < 0)
+
+        # Calculate Buy & Hold comparison
+        buy_hold_return_pct, buy_hold_equity_curve = calculate_buy_hold(df, cash, start_date, end_date)
+
+        # Calculate USD-based metrics
+        final_equity_value = unique_equity[-1]['value'] if unique_equity else cash
+        total_pnl_usd = final_equity_value - cash
+        max_drawdown_usd = calculate_max_drawdown_usd(unique_equity)
+
         return {
             "status": "success",
             "message": "Strategy executed successfully.",
@@ -773,14 +914,31 @@ def RSI(values, n):
             "param_update": param_update,
             "results": {
                 "symbol": req.symbol,
+                # Percentage metrics
                 "return_pct": safe_float(stats.get('Return [%]', 0.0)),
                 "win_rate": safe_float(stats.get('Win Rate [%]', 0.0)),
-                "max_drawdown": safe_float(stats.get('Max. Drawdown [%]', 0.0)),
+                "max_drawdown_pct": safe_float(stats.get('Max. Drawdown [%]', 0.0)),
                 "sharpe": safe_float(stats.get('Sharpe Ratio', 0.0)),
                 "profit_factor": safe_float(stats.get('Profit Factor', 0.0)),
+                # USD metrics
+                "total_pnl_usd": safe_float(total_pnl_usd),
+                "max_drawdown_usd": safe_float(max_drawdown_usd),
+                # Trade counts
                 "total_trades": int(stats.get('# Trades', 0)),
+                "profitable_trades": profitable_count,
+                "losing_trades": losing_count,
+                # Buy & Hold comparison
+                "buy_hold_return_pct": safe_float(buy_hold_return_pct),
+                "buy_hold_equity_curve": buy_hold_equity_curve,
+                # Trade data
                 "trades": trade_markers,
-                "equity_curve": unique_equity
+                "trades_detailed": trades_detailed,
+                "equity_curve": unique_equity,
+                # Backtest parameters (for re-running)
+                "start_date": start_date,
+                "end_date": end_date,
+                "initial_capital": cash,
+                "commission": comm
             }
         }
 
@@ -789,4 +947,188 @@ def RSI(values, n):
             "status": "error",
             "message": f"Backtest execution error: {traceback.format_exc()}",
             "param_update": param_update
+        }
+
+
+class RerunRequest(BaseModel):
+    strategy_code: str
+    symbol: str
+    start_date: str
+    end_date: str
+    initial_capital: float
+    commission: float
+
+@router.post("/rerun")
+async def rerun_simulation(req: RerunRequest):
+    """Re-run an existing strategy with new date range (no LLM call)."""
+    print(f"[SIMULATOR] Rerun request: {req.symbol} ({req.start_date} to {req.end_date})")
+
+    strategy_code = req.strategy_code
+    if not strategy_code or "class CustomStrategy" not in strategy_code:
+        raise HTTPException(status_code=400, detail="Invalid strategy code")
+
+    # Extract indicators from code to determine warmup period
+    code_indicators = extract_indicators_from_code(strategy_code)
+    max_period = get_max_indicator_period(code_indicators, strategy_code)
+
+    try:
+        start_date = req.start_date
+        end_date = req.end_date
+
+        # Calculate warmup start date
+        warmup_days = int(max_period * 1.5) + 50 if max_period > 0 else 0
+        actual_start_date = datetime.strptime(start_date, '%Y-%m-%d')
+        warmup_start_date = actual_start_date - pd.Timedelta(days=warmup_days)
+        warmup_start_str = warmup_start_date.strftime('%Y-%m-%d')
+
+        print(f"[SIMULATOR] Rerun: Fetching data from {warmup_start_str} (warmup: {warmup_days} days)")
+        df = yf.download(req.symbol, start=warmup_start_str, end=end_date, progress=False)
+
+        if df.empty:
+            raise ValueError(f"No data fetched for {req.symbol}")
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Data fetch error: {str(e)}")
+
+    # Setup execution environment
+    exec_env = {}
+    setup_code = """
+import pandas as pd
+import numpy as np
+from backtesting import Strategy
+from backtesting.lib import crossover
+
+def SMA(values, n):
+    return pd.Series(values).rolling(n).mean()
+
+def EMA(values, n):
+    return pd.Series(values).ewm(span=n, adjust=False).mean()
+
+def RSI(values, n):
+    delta = pd.Series(values).diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=n).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=n).mean()
+    rs = gain / loss
+    return 100 - (100 / (1 + rs))
+"""
+    try:
+        exec(setup_code, exec_env, exec_env)
+        exec(strategy_code, exec_env, exec_env)
+        CustomStrategy = exec_env.get("CustomStrategy")
+        if not CustomStrategy:
+            raise ValueError("Strategy code does not contain 'CustomStrategy' class")
+    except Exception as e:
+        return {"status": "error", "message": f"Failed to compile strategy: {str(e)}"}
+
+    # Run backtest
+    try:
+        cash = req.initial_capital
+        comm = req.commission
+
+        bt = Backtest(df, CustomStrategy, cash=cash, commission=comm, exclusive_orders=True)
+        stats = bt.run()
+
+        trades_df = stats['_trades']
+
+        # Filter trades to actual date range
+        if not trades_df.empty and warmup_days > 0:
+            actual_start_dt = pd.Timestamp(actual_start_date).tz_localize(None)
+            trades_df_copy = trades_df.copy()
+            if trades_df_copy['EntryTime'].dt.tz is not None:
+                trades_df_copy['EntryTime'] = trades_df_copy['EntryTime'].dt.tz_localize(None)
+            trades_df = trades_df[trades_df_copy['EntryTime'] >= actual_start_dt]
+
+        # Extract trade markers
+        trade_markers = []
+        for idx, row in trades_df.iterrows():
+            size = int(row['Size'])
+            direction = "Buy" if size > 0 else "Sell"
+            trade_markers.append({
+                "time": int(row['EntryTime'].timestamp()),
+                "type": direction,
+                "price": safe_float(row['EntryPrice']),
+                "size": abs(size)
+            })
+            trade_markers.append({
+                "time": int(row['ExitTime'].timestamp()),
+                "type": "Exit",
+                "price": safe_float(row['ExitPrice']),
+                "pnl": safe_float(row['PnL']),
+                "size": abs(size)
+            })
+
+        # Extract equity curve
+        equity_data = []
+        if '_equity_curve' in stats and not stats['_equity_curve'].empty:
+            eq_df = stats['_equity_curve']
+            if warmup_days > 0:
+                eq_df = eq_df[eq_df.index >= actual_start_date]
+            for dt, row in eq_df.iterrows():
+                date_str = dt.strftime('%Y-%m-%d')
+                equity_data.append({"time": date_str, "value": safe_float(row['Equity'])})
+
+        # Deduplicate equity
+        unique_equity = []
+        last_t = None
+        for eq in equity_data:
+            if eq["time"] != last_t:
+                unique_equity.append(eq)
+                last_t = eq["time"]
+
+        # Calculate enhanced trade data
+        trades_detailed = []
+        profitable_count = 0
+        losing_count = 0
+        if not trades_df.empty:
+            trades_detailed = calculate_trade_excursions(df, trades_df, cash)
+            profitable_count = sum(1 for t in trades_detailed if t['pnl_usd'] > 0)
+            losing_count = sum(1 for t in trades_detailed if t['pnl_usd'] < 0)
+
+        # Calculate Buy & Hold
+        buy_hold_return_pct, buy_hold_equity_curve = calculate_buy_hold(df, cash, start_date, end_date)
+
+        # Calculate USD metrics
+        final_equity_value = unique_equity[-1]['value'] if unique_equity else cash
+        total_pnl_usd = final_equity_value - cash
+        max_drawdown_usd = calculate_max_drawdown_usd(unique_equity)
+
+        # Generate code hash
+        code_hash = generate_code_hash(strategy_code)
+
+        print(f"[SIMULATOR] Rerun complete: {len(trades_df)} trades, Return: {stats.get('Return [%]', 0):.2f}%")
+
+        return {
+            "status": "success",
+            "message": "Strategy re-executed successfully.",
+            "code": strategy_code,
+            "code_hash": code_hash,
+            "results": {
+                "symbol": req.symbol,
+                "return_pct": safe_float(stats.get('Return [%]', 0.0)),
+                "win_rate": safe_float(stats.get('Win Rate [%]', 0.0)),
+                "max_drawdown_pct": safe_float(stats.get('Max. Drawdown [%]', 0.0)),
+                "sharpe": safe_float(stats.get('Sharpe Ratio', 0.0)),
+                "profit_factor": safe_float(stats.get('Profit Factor', 0.0)),
+                "total_pnl_usd": safe_float(total_pnl_usd),
+                "max_drawdown_usd": safe_float(max_drawdown_usd),
+                "total_trades": int(stats.get('# Trades', 0)),
+                "profitable_trades": profitable_count,
+                "losing_trades": losing_count,
+                "buy_hold_return_pct": safe_float(buy_hold_return_pct),
+                "buy_hold_equity_curve": buy_hold_equity_curve,
+                "trades": trade_markers,
+                "trades_detailed": trades_detailed,
+                "equity_curve": unique_equity,
+                "start_date": start_date,
+                "end_date": end_date,
+                "initial_capital": cash,
+                "commission": comm
+            }
+        }
+
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": f"Backtest execution error: {traceback.format_exc()}"
         }

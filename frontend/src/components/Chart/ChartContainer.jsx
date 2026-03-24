@@ -7,6 +7,7 @@ import { useSimulatorStore } from '../../store/simulatorStore';
 import { fetchHistBars } from '../../lib/api';
 import { calculateIndicator } from '../../lib/indicators';
 import OverlayLegend from '../Indicators/OverlayLegend';
+import StrategyTesterPane from './StrategyTesterPane';
 
 function getChartOptions(theme, showTimeScale) {
   const isDark = theme === 'dark';
@@ -964,18 +965,12 @@ export default function ChartContainer() {
           </div>
 
           <div style={{ position: 'absolute', left: 0, right: 0, bottom: `${BOTTOM_BAR_HEIGHT}px`, height: `${simPaneHeight}px`, zIndex: 11, background: 'var(--tv-color-pane-background, #131722)', display: 'flex', flexDirection: 'column' }}>
-            {hasSimResults ? (
-              <EquityCurvePane 
-                results={simResults} 
-                theme={theme} 
-                onClose={() => setShowSimPane(false)}
-               />
-            ) : (
-              <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--tv-color-text-secondary, #787b86)', fontSize: '13px' }}>
-                 Run a strategy to view backtest results here.
-                 <button onClick={() => setShowSimPane(false)} style={{ position: 'absolute', top: '8px', right: '12px', background: 'transparent', border: 'none', color: '#787b86', cursor: 'pointer', fontWeight: 'bold' }}>✕</button>
-              </div>
-            )}
+            <StrategyTesterPane
+              results={simResults}
+              theme={theme}
+              onClose={() => setShowSimPane(false)}
+              mainChart={mainChartRef.current}
+            />
           </div>
         </React.Fragment>
       )}
@@ -988,200 +983,6 @@ export default function ChartContainer() {
             </svg>
          </button>
       </div>
-    </div>
-  );
-}
-
-// --- NEW COMPONENT: DEDICATED EQUITY CURVE PANE ---
-function EquityCurvePane({ results, theme, onClose }) {
-  const containerRef = useRef(null);
-  const chartRef = useRef(null);
-  const seriesRef = useRef(null);
-
-  useEffect(() => {
-    if (!containerRef.current) return;
-    
-    const rect = containerRef.current.getBoundingClientRect();
-    const initWidth = rect.width > 0 ? rect.width : 800;
-    const initHeight = rect.height > 0 ? rect.height : 200;
-
-    const baseOptions = getChartOptions(theme, true);
-
-    // OVERRIDE: Lock user interactions and strictly fix edges
-    // Enable vertical crosshair for equity curve
-    const chartOptions = {
-        ...baseOptions,
-        width: initWidth,
-        height: initHeight,
-        handleScroll: false, // Prevents panning/scrolling
-        handleScale: false,  // Prevents zooming
-        crosshair: {
-            mode: 1, // Normal crosshair mode
-            vertLine: {
-                visible: true,
-                color: theme === 'dark' ? '#758696' : '#9598a1',
-                width: 1,
-                style: 2, // Dashed
-                labelVisible: true,
-                labelBackgroundColor: theme === 'dark' ? '#2a2e39' : '#f0f3fa',
-            },
-            horzLine: {
-                visible: true,
-                color: theme === 'dark' ? '#758696' : '#9598a1',
-                width: 1,
-                style: 2,
-                labelVisible: true,
-                labelBackgroundColor: theme === 'dark' ? '#2a2e39' : '#f0f3fa',
-            }
-        },
-        timeScale: {
-            ...baseOptions.timeScale,
-            rightOffset: 0,       // Removes empty space on the right edge
-            fixLeftEdge: true,    // Anchors to exact left boundary
-            fixRightEdge: true,   // Anchors to exact right boundary
-        }
-    };
-
-    const chart = createChart(containerRef.current, chartOptions);
-    chartRef.current = chart;
-
-    const handleResize = () => {
-        if (containerRef.current && chartRef.current) {
-            const newRect = containerRef.current.getBoundingClientRect();
-            if (newRect.width > 0 && newRect.height > 0) {
-                chartRef.current.applyOptions({ width: newRect.width, height: newRect.height });
-                chartRef.current.timeScale().fitContent(); // Enforce stretch on resize
-            }
-        }
-    };
-
-    const resizeObserver = new ResizeObserver(handleResize);
-    resizeObserver.observe(containerRef.current);
-
-    setTimeout(handleResize, 50);
-    setTimeout(handleResize, 200);
-
-    return () => {
-      resizeObserver.disconnect();
-      chart.remove();
-      chartRef.current = null;
-      seriesRef.current = null;
-    };
-  }, [theme]);
-
-  useEffect(() => {
-    if (!chartRef.current || !results || !results.equity_curve) return;
-    
-    if (!seriesRef.current) {
-      seriesRef.current = chartRef.current.addSeries(LineSeries, {
-        color: '#2962ff', lineWidth: 2, crosshairMarkerVisible: true, lastValueVisible: true, priceLineVisible: false,
-      });
-    }
-    
-    let eqData = [];
-    if (Array.isArray(results.equity_curve) && results.equity_curve.length > 0) {
-        const first = results.equity_curve[0];
-        
-        if (typeof first === 'number') {
-            eqData = results.equity_curve.map((val, idx) => {
-                const d = new Date();
-                d.setDate(d.getDate() - (results.equity_curve.length - idx));
-                return { time: d.toISOString().split('T')[0], value: val };
-            });
-        } else if (typeof first === 'object') {
-            const eqMap = new Map();
-            results.equity_curve.forEach((pt, idx) => {
-                let t = pt.time !== undefined ? pt.time : (pt.date || pt.timestamp);
-                
-                if (t === undefined || (typeof t === 'number' && t < 1000000)) {
-                    const d = new Date();
-                    d.setDate(d.getDate() - (results.equity_curve.length - idx));
-                    t = d.toISOString().split('T')[0];
-                } else if (typeof t === 'string') {
-                    if (t.includes('T')) t = t.split('T')[0];
-                } else if (typeof t === 'number') {
-                    const d = new Date(t * (t > 1e11 ? 1 : 1000));
-                    t = d.toISOString().split('T')[0];
-                }
-                
-                let v = pt.value !== undefined ? pt.value : pt.equity;
-                if (typeof v === 'string') v = parseFloat(v.replace(/[^0-9.-]/g, ''));
-                
-                if (t && v !== undefined && !isNaN(v)) {
-                    const tStr = String(t);
-                    if (tStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
-                        eqMap.set(tStr, v);
-                    }
-                }
-            });
-            
-            eqData = Array.from(eqMap.entries())
-              .map(([time, value]) => ({ time, value }))
-              .sort((a, b) => a.time < b.time ? -1 : (a.time > b.time ? 1 : 0));
-        }
-    }
-
-    const uniqueEqData = [];
-    let lastTime = null;
-    for (const pt of eqData) {
-        if (pt.time !== lastTime) {
-            uniqueEqData.push(pt);
-            lastTime = pt.time;
-        }
-    }
-
-    if (uniqueEqData.length === 0) return;
-
-    try {
-        seriesRef.current.setData(uniqueEqData);
-        setTimeout(() => {
-            if (chartRef.current) {
-                // By calling fitContent() combined with fixLeftEdge/fixRightEdge,
-                // this curve stays fully independent and horizontally stretched like TradingView!
-                chartRef.current.timeScale().fitContent();
-            }
-        }, 50);
-    } catch(e) {}
-  }, [results]);
-
-  const isUp = results.return_pct >= 0;
-  const pnlColor = isUp ? '#089981' : '#f23645';
-  const pnlSign = isUp ? '+' : '';
-
-  return (
-    <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
-       <div style={{ display: 'flex', gap: '32px', padding: '12px 16px', borderBottom: '1px solid var(--tv-color-border, #2a2e39)', flexShrink: 0 }}>
-           
-           <div>
-               <div style={{ fontSize: '11px', color: 'var(--tv-color-text-secondary, #787b86)', marginBottom: '4px' }}>Total P&L</div>
-               <div style={{ fontSize: '16px', color: pnlColor, fontWeight: 'bold' }}>{pnlSign}{results.return_pct?.toFixed(2) || '0.00'}%</div>
-           </div>
-           
-           <div>
-               <div style={{ fontSize: '11px', color: 'var(--tv-color-text-secondary, #787b86)', marginBottom: '4px' }}>Max equity drawdown</div>
-               <div style={{ fontSize: '16px', color: 'var(--tv-color-text-primary, #d1d4dc)', fontWeight: 'bold' }}>{Math.abs(results.max_drawdown || 0).toFixed(2)}%</div>
-           </div>
-           
-           <div>
-               <div style={{ fontSize: '11px', color: 'var(--tv-color-text-secondary, #787b86)', marginBottom: '4px' }}>Total trades</div>
-               <div style={{ fontSize: '16px', color: 'var(--tv-color-text-primary, #d1d4dc)', fontWeight: 'bold' }}>{results.total_trades || Math.floor((results.trades?.length || 0)/2) || 0}</div>
-           </div>
-           
-           <div>
-               <div style={{ fontSize: '11px', color: 'var(--tv-color-text-secondary, #787b86)', marginBottom: '4px' }}>Profitable trades</div>
-               <div style={{ fontSize: '16px', color: 'var(--tv-color-text-primary, #d1d4dc)', fontWeight: 'bold' }}>{results.win_rate?.toFixed(2) || '0.00'}%</div>
-           </div>
-           
-           <div>
-               <div style={{ fontSize: '11px', color: 'var(--tv-color-text-secondary, #787b86)', marginBottom: '4px' }}>Profit factor</div>
-               <div style={{ fontSize: '16px', color: 'var(--tv-color-text-primary, #d1d4dc)', fontWeight: 'bold' }}>{results.profit_factor ? results.profit_factor.toFixed(3) : 'N/A'}</div>
-           </div>
-           
-           <button onClick={() => { useSimulatorStore.setState({ results: null }); onClose(); }} style={{ marginLeft: 'auto', background: 'transparent', border: 'none', color: 'var(--tv-color-text-secondary, #787b86)', cursor: 'pointer', padding: '4px', fontWeight: 'bold' }} title="Close Results">✕</button>
-       </div>
-       <div style={{ padding: '8px 16px', fontSize: '12px', fontWeight: 'bold', color: 'var(--tv-color-text-primary, #d1d4dc)', flexShrink: 0 }}>Equity chart</div>
-       
-       <div ref={containerRef} style={{ flex: 1, width: '100%', minHeight: '150px' }} />
     </div>
   );
 }

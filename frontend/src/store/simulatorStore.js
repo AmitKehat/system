@@ -21,12 +21,104 @@ export const useSimulatorStore = create(
       isProcessing: false,
       results: null,
 
+      // Strategy Tester Panel state
+      activeTab: 'metrics',  // 'metrics' | 'trades'
+      dateRangeMode: 'custom',  // 'from_chart' | '7d' | '30d' | '90d' | '365d' | 'all' | 'custom'
+      lastStrategyCode: null,
+      lastStrategyName: null,
+      showBuyHoldComparison: true,
+      selectedTradeIndex: null,
+
       setMode: (mode) => set({ mode }),
       setProvider: (provider) => set({ provider }),
       setApiKey: (provider, key) => set((state) => ({ apiKeys: { ...state.apiKeys, [provider]: key } })),
       updateParams: (updates) => set((state) => ({ parameters: { ...state.parameters, ...updates } })),
 
-      clearChat: () => set({ chatHistory: [], results: null }),
+      clearChat: () => set({ chatHistory: [], results: null, lastStrategyCode: null, lastStrategyName: null, selectedTradeIndex: null }),
+
+      // Strategy Tester Panel actions
+      setActiveTab: (tab) => set({ activeTab: tab }),
+      setDateRangeMode: (mode) => set({ dateRangeMode: mode }),
+      toggleBuyHoldComparison: () => set((s) => ({ showBuyHoldComparison: !s.showBuyHoldComparison })),
+      selectTrade: (index) => set({ selectedTradeIndex: index }),
+      clearSelectedTrade: () => set({ selectedTradeIndex: null }),
+
+      rerunStrategy: async (startDate, endDate) => {
+          const { lastStrategyCode, results, parameters } = get();
+          if (!lastStrategyCode || !results?.symbol) {
+              console.error('[SIMULATOR] Cannot rerun: no strategy code or symbol');
+              return;
+          }
+
+          set({ isProcessing: true, selectedTradeIndex: null });
+
+          try {
+              const apiUrl = import.meta.env.VITE_API_URL || `http://${window.location.hostname || 'localhost'}:8000`;
+              const res = await fetch(`${apiUrl}/api/simulator/rerun`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                      strategy_code: lastStrategyCode,
+                      symbol: results.symbol,
+                      start_date: startDate,
+                      end_date: endDate,
+                      initial_capital: parameters.initialCapital,
+                      commission: parameters.commission
+                  })
+              });
+
+              if (!res.ok) {
+                  throw new Error(`Server returned ${res.status}`);
+              }
+
+              const data = await res.json();
+
+              if (data.status === 'success') {
+                  console.log(`[SIMULATOR] Rerun SUCCESS: ${data.results?.total_trades} trades, ${data.results?.return_pct?.toFixed(2)}%`);
+
+                  // Update chart timeframe if needed
+                  const chartStore = useChartStore.getState();
+                  const start = new Date(startDate);
+                  const end = new Date(endDate);
+                  const daysDiff = Math.ceil((end - start) / (1000 * 60 * 60 * 24));
+
+                  let targetDuration = '1 Y';
+                  if (daysDiff <= 7) targetDuration = '1 W';
+                  else if (daysDiff <= 30) targetDuration = '1 M';
+                  else if (daysDiff <= 90) targetDuration = '3 M';
+                  else if (daysDiff <= 180) targetDuration = '6 M';
+                  else if (daysDiff <= 365) targetDuration = '1 Y';
+                  else if (daysDiff <= 730) targetDuration = '2 Y';
+                  else targetDuration = '5 Y';
+
+                  if (chartStore.duration !== targetDuration) {
+                      chartStore.setDuration(targetDuration);
+                  }
+
+                  // Update results and parameters
+                  set({
+                      results: data.results,
+                      lastStrategyCode: data.code
+                  });
+                  get().updateParams({ startDate, endDate });
+
+                  // Update strategy indicator on chart
+                  chartStore.addOrUpdateStrategyIndicator({
+                      codeHash: data.code_hash,
+                      strategyName: get().lastStrategyName || 'Custom Strategy',
+                      trades: data.results.trades,
+                      symbol: results.symbol,
+                      strategyIndicators: []
+                  });
+              } else {
+                  console.error('[SIMULATOR] Rerun failed:', data.message);
+              }
+          } catch (e) {
+              console.error('[SIMULATOR] Rerun error:', e.message);
+          } finally {
+              set({ isProcessing: false });
+          }
+      },
 
       sendMessage: async (prompt, symbol) => {
         const { provider, apiKeys, chatHistory, parameters, mode } = get();
@@ -120,11 +212,14 @@ export const useSimulatorStore = create(
 
               set({
                   results: data.results,
+                  lastStrategyCode: data.code,
+                  lastStrategyName: data.strategy_name || 'Custom Strategy',
+                  selectedTradeIndex: null,
                   // Store the code in a hidden format so it can be found by history search
                   // The backend searches for ```python...``` blocks in history
                   chatHistory: [...newHistory, {
                       role: 'assistant',
-                      content: `Simulation complete!\n\nSymbol: ${data.results.symbol}\nReturn: ${data.results.return_pct.toFixed(2)}%\nWin Rate: ${data.results.win_rate.toFixed(2)}%\nMax DD: ${data.results.max_drawdown.toFixed(2)}%\nTrades: ${data.results.total_trades}\n\nI have overlaid the trades on your chart.${data.code ? `\n\n\`\`\`python\n${data.code}\n\`\`\`` : ''}`
+                      content: `Simulation complete!\n\nSymbol: ${data.results.symbol}\nReturn: ${data.results.return_pct.toFixed(2)}%\nWin Rate: ${data.results.win_rate.toFixed(2)}%\nMax DD: ${(data.results.max_drawdown_pct || data.results.max_drawdown || 0).toFixed(2)}%\nTrades: ${data.results.total_trades}\n\nI have overlaid the trades on your chart.${data.code ? `\n\n\`\`\`python\n${data.code}\n\`\`\`` : ''}`
                   }]
               });
 
@@ -172,7 +267,10 @@ export const useSimulatorStore = create(
         apiKeys: state.apiKeys,
         parameters: state.parameters,
         chatHistory: state.chatHistory,
-        results: state.results
+        results: state.results,
+        lastStrategyCode: state.lastStrategyCode,
+        lastStrategyName: state.lastStrategyName,
+        showBuyHoldComparison: state.showBuyHoldComparison
       })
     }
   )
