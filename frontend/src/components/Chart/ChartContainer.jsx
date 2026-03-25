@@ -690,8 +690,16 @@ export default function ChartContainer() {
           return;
       }
 
-      // Start blinking
+      // Start blinking - set to true and IMMEDIATELY update markers
       blinkStateRef.current = true;
+
+      // Use setTimeout to ensure markers update on next tick after state is set
+      setTimeout(() => {
+          if (markersPluginRef.current && mainSeriesRef.current.has('candles')) {
+              updateMarkersWithHighlight();
+          }
+      }, 0);
+
       let blinkCount = 0;
       const maxBlinks = 10; // Blink 5 times (on/off = 2 counts per blink)
 
@@ -709,6 +717,10 @@ export default function ChartContainer() {
               clearInterval(blinkIntervalRef.current);
               blinkIntervalRef.current = null;
               blinkStateRef.current = true; // Keep highlighted
+              // Final update to ensure highlight stays visible
+              if (markersPluginRef.current && mainSeriesRef.current.has('candles')) {
+                  updateMarkersWithHighlight();
+              }
           }
       }, 300);
 
@@ -718,7 +730,7 @@ export default function ChartContainer() {
               blinkIntervalRef.current = null;
           }
       };
-  }, [selectedTradeIndex, selectedTradeTimes]);
+  }, [selectedTradeIndex, selectedTradeTimes, updateMarkersWithHighlight]);
 
   // Function to update markers with highlight
   const updateMarkersWithHighlight = useCallback(() => {

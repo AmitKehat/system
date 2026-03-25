@@ -389,7 +389,9 @@ STEP 1 - UNDERSTAND THE STRATEGY:
 - Ask clarifying questions if needed
 - Once you understand the strategy, proceed to Step 2
 
-STEP 2 - PRESENT SUMMARY FOR APPROVAL:
+STEP 2 - PRESENT SUMMARY FOR APPROVAL (MANDATORY - NEVER SKIP):
+- CRITICAL: You MUST present a full summary with HTML formatting BEFORE outputting any code
+- NEVER output Python code without first showing the summary and getting explicit user approval
 - Determine the TARGET SYMBOL for the backtest:
   * If the user mentioned a specific ticker (AAPL, INTC, TSLA, etc.), use that ticker
   * If no ticker mentioned, use the current chart symbol: {req.symbol}
@@ -436,6 +438,11 @@ CRITICAL RULES:
    - NEVER invent or output fake backtest results
    - You CANNOT run backtests - only the system can
    - The ONLY way to trigger a backtest is to output Python code
+   - MANDATORY SEQUENCE: Summary MUST be shown BEFORE code
+     * First message: Show JSON block + HTML summary, ask "Should I run this?"
+     * Second message (after user says "yes"): Output Python code only
+   - NEVER combine summary and code in the same message
+   - NEVER output code in response to the initial strategy request
 
 3. STRATEGY MODIFICATIONS:
    - If the user wants to change the strategy after seeing the summary, update and show a NEW summary
@@ -674,13 +681,35 @@ CRITICAL RULES:
         # This happens when user changed strategy but LLM didn't generate new code
         if is_approval(req.prompt) and param_update and param_update.get("strategyName"):
             strategy_name = param_update.get("strategyName", "the new strategy")
-            retry_message = f"""I apologize, but I need to generate the code for **{strategy_name}**. Let me do that now.
+            target_symbol = param_update.get("symbol", req.symbol)
+            start_date = param_update.get("startDate", req.parameters.get("startDate", "2023-01-01"))
+            end_date = param_update.get("endDate", req.parameters.get("endDate", "2024-12-31"))
+            initial_capital = param_update.get("initialCapital", req.parameters.get("initialCapital", 100000))
+            commission = param_update.get("commission", req.parameters.get("commission", 0.001))
 
-```json
+            # Build indicators list for display
+            indicators_display = ""
+            if param_update.get("indicators"):
+                for ind in param_update["indicators"]:
+                    ind_type = ind.get("type", "").upper()
+                    ind_period = ind.get("period", "")
+                    if ind_period:
+                        indicators_display += f"  <li>{ind_type}({ind_period})</li>\n"
+
+            retry_message = f"""```json
 {json.dumps(param_update, indent=2)}
 ```
 
-Please say "yes" or "run it" to execute this strategy, or let me know if you'd like any modifications."""
+<h3 style="margin: 0 0 10px 0; color: #d1d4dc;">Strategy Summary</h3>
+<div style="margin-left: 10px; border-left: 3px solid #2962ff; padding-left: 15px; margin-bottom: 15px;">
+  <span style="color: #787b86;">Strategy:</span> <b style="color: #2962ff;">{strategy_name}</b><br>
+  <span style="color: #787b86;">Target Symbol:</span> <b style="color: #2962ff;">{target_symbol}</b><br>
+  <span style="color: #787b86;">Date Range:</span> <b style="color: #d1d4dc;">{start_date}</b> to <b style="color: #d1d4dc;">{end_date}</b><br>
+  <span style="color: #787b86;">Initial Capital:</span> <b style="color: #089981;">${initial_capital:,}</b><br>
+  <span style="color: #787b86;">Commission:</span> <b style="color: #f23645;">{commission}</b>
+</div>
+{f'<h4 style="margin: 0 0 10px 0; color: #d1d4dc;">Indicators Used</h4><ul style="margin: 0 0 15px 20px; color: #d1d4dc;">{indicators_display}</ul>' if indicators_display else ''}
+<b style="color: #089981;">Should I run this backtest now?</b>"""
 
             return {
                 "status": "chat_reply",
