@@ -293,13 +293,23 @@ def call_llm(provider: str, api_key: str, messages: List[Dict[str, str]]) -> str
         raise e
 
 def is_approval(prompt: str) -> bool:
-    """Check if the user's prompt is an approval to run the backtest."""
+    """Check if the user's prompt is an approval to run the backtest.
+
+    Only short messages (< 50 chars) are considered potential approvals.
+    This prevents detecting strategy descriptions like "Run it for AAPL" as approvals.
+    """
     prompt_lower = prompt.lower().strip()
+
+    # Long messages are strategy descriptions, not approvals
+    # e.g., "I want you to run a strategy. Run it for AAPL..." should NOT be an approval
+    if len(prompt_lower) > 50:
+        return False
+
     approval_phrases = [
         "yes", "yeah", "yep", "yup", "sure", "ok", "okay", "go ahead",
         "run it", "do it", "proceed", "execute", "let's go", "approved",
         "confirm", "confirmed", "please run", "run the backtest", "run backtest",
-        "sounds good", "looks good", "perfect", "great", "go for it"
+        "sounds good", "looks good", "perfect", "great", "go for it", "go"
     ]
     return any(phrase in prompt_lower for phrase in approval_phrases)
 
