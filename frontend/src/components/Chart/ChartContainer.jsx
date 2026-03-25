@@ -677,62 +677,9 @@ export default function ChartContainer() {
       };
   }, [selectedTradeIndex, simResults]);
 
-  // Blinking effect for selected trade
-  useEffect(() => {
-      // Clear any existing interval
-      if (blinkIntervalRef.current) {
-          clearInterval(blinkIntervalRef.current);
-          blinkIntervalRef.current = null;
-      }
+  // Function to update markers with highlight (defined BEFORE blinking effect that uses it)
+  const updateMarkersWithHighlightRef = useRef(null);
 
-      if (selectedTradeIndex === null || !selectedTradeTimes) {
-          blinkStateRef.current = false;
-          return;
-      }
-
-      // Start blinking - set to true and IMMEDIATELY update markers
-      blinkStateRef.current = true;
-
-      // Use setTimeout to ensure markers update on next tick after state is set
-      setTimeout(() => {
-          if (markersPluginRef.current && mainSeriesRef.current.has('candles')) {
-              updateMarkersWithHighlight();
-          }
-      }, 0);
-
-      let blinkCount = 0;
-      const maxBlinks = 10; // Blink 5 times (on/off = 2 counts per blink)
-
-      blinkIntervalRef.current = setInterval(() => {
-          blinkStateRef.current = !blinkStateRef.current;
-          blinkCount++;
-
-          // Force re-render of markers
-          if (markersPluginRef.current && mainSeriesRef.current.has('candles')) {
-              updateMarkersWithHighlight();
-          }
-
-          // Stop blinking after maxBlinks
-          if (blinkCount >= maxBlinks) {
-              clearInterval(blinkIntervalRef.current);
-              blinkIntervalRef.current = null;
-              blinkStateRef.current = true; // Keep highlighted
-              // Final update to ensure highlight stays visible
-              if (markersPluginRef.current && mainSeriesRef.current.has('candles')) {
-                  updateMarkersWithHighlight();
-              }
-          }
-      }, 300);
-
-      return () => {
-          if (blinkIntervalRef.current) {
-              clearInterval(blinkIntervalRef.current);
-              blinkIntervalRef.current = null;
-          }
-      };
-  }, [selectedTradeIndex, selectedTradeTimes, updateMarkersWithHighlight]);
-
-  // Function to update markers with highlight
   const updateMarkersWithHighlight = useCallback(() => {
       if (!mainChartRef.current || !mainSeriesRef.current.has('candles')) return;
       if (!markersPluginRef.current) return;
@@ -831,6 +778,64 @@ export default function ChartContainer() {
           console.error('[MARKERS] Error setting markers:', e);
       }
   }, [strategyIndicators, displayBars, symbol, selectedTradeTimes]);
+
+  // Keep ref updated with latest function
+  updateMarkersWithHighlightRef.current = updateMarkersWithHighlight;
+
+  // Blinking effect for selected trade - uses ref to avoid dependency on callback
+  useEffect(() => {
+      // Clear any existing interval
+      if (blinkIntervalRef.current) {
+          clearInterval(blinkIntervalRef.current);
+          blinkIntervalRef.current = null;
+      }
+
+      if (selectedTradeIndex === null || !selectedTradeTimes) {
+          blinkStateRef.current = false;
+          return;
+      }
+
+      // Start blinking - set to true and IMMEDIATELY update markers
+      blinkStateRef.current = true;
+
+      // Use setTimeout to ensure markers update on next tick after state is set
+      setTimeout(() => {
+          if (markersPluginRef.current && mainSeriesRef.current.has('candles') && updateMarkersWithHighlightRef.current) {
+              updateMarkersWithHighlightRef.current();
+          }
+      }, 0);
+
+      let blinkCount = 0;
+      const maxBlinks = 6; // 3 full blinks (on/off = 2 counts per blink)
+
+      blinkIntervalRef.current = setInterval(() => {
+          blinkStateRef.current = !blinkStateRef.current;
+          blinkCount++;
+
+          // Force re-render of markers using ref
+          if (markersPluginRef.current && mainSeriesRef.current.has('candles') && updateMarkersWithHighlightRef.current) {
+              updateMarkersWithHighlightRef.current();
+          }
+
+          // Stop blinking after maxBlinks
+          if (blinkCount >= maxBlinks) {
+              clearInterval(blinkIntervalRef.current);
+              blinkIntervalRef.current = null;
+              blinkStateRef.current = true; // Keep highlighted
+              // Final update to ensure highlight stays visible
+              if (markersPluginRef.current && mainSeriesRef.current.has('candles') && updateMarkersWithHighlightRef.current) {
+                  updateMarkersWithHighlightRef.current();
+              }
+          }
+      }, 300);
+
+      return () => {
+          if (blinkIntervalRef.current) {
+              clearInterval(blinkIntervalRef.current);
+              blinkIntervalRef.current = null;
+          }
+      };
+  }, [selectedTradeIndex, selectedTradeTimes]);
 
   useEffect(() => {
       if (!mainChartRef.current || !mainSeriesRef.current.has('candles')) {

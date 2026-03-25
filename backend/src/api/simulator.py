@@ -399,11 +399,12 @@ STEP 2 - PRESENT SUMMARY FOR APPROVAL (MANDATORY - NEVER SKIP):
 - Present the strategy summary using this EXACT HTML format:
 
 {triple_ticks}json
-{{"symbol": "TARGET_SYMBOL", "strategyName": "SHORT_DESCRIPTIVE_NAME", "startDate": "YYYY-MM-DD", "endDate": "YYYY-MM-DD", "initialCapital": CAPITAL_NUMBER, "indicators": [{{"type": "ema", "period": 150}}, {{"type": "rsi", "period": 14}}]}}
+{{"symbol": "TARGET_SYMBOL", "strategyName": "SHORT_DESCRIPTIVE_NAME", "startDate": "YYYY-MM-DD", "endDate": "YYYY-MM-DD", "initialCapital": CAPITAL_NUMBER, "indicators": [{{"type": "ema", "period": 150}}], "rules": ["Entry: Buy when price crosses above EMA(150)", "Exit: Sell when price crosses below EMA(150)"]}}
 {triple_ticks}
 
 <h3 style="margin: 0 0 10px 0; color: #d1d4dc;">Strategy Summary</h3>
 <div style="margin-left: 10px; border-left: 3px solid #2962ff; padding-left: 15px; margin-bottom: 15px;">
+  <span style="color: #787b86;">Strategy:</span> <b style="color: #2962ff;">STRATEGY_NAME</b><br>
   <span style="color: #787b86;">Target Symbol:</span> <b style="color: #2962ff;">TARGET_SYMBOL</b><br>
   <span style="color: #787b86;">Date Range:</span> <b style="color: #d1d4dc;">START_DATE</b> to <b style="color: #d1d4dc;">END_DATE</b><br>
   <span style="color: #787b86;">Initial Capital:</span> <b style="color: #089981;">${req.parameters.get('initialCapital')}</b><br>
@@ -411,13 +412,16 @@ STEP 2 - PRESENT SUMMARY FOR APPROVAL (MANDATORY - NEVER SKIP):
 </div>
 <h4 style="margin: 0 0 10px 0; color: #d1d4dc;">Strategy Rules</h4>
 <ul style="margin: 0 0 15px 20px; color: #d1d4dc;">
-  <li>(Rule 1)</li>
-  <li>(Rule 2)</li>
-  ...
+  <li><b style="color: #089981;">Entry:</b> (describe when to buy)</li>
+  <li><b style="color: #f23645;">Exit:</b> (describe when to sell)</li>
 </ul>
 <b style="color: #089981;">Should I run this backtest now?</b>
 
-IMPORTANT: The JSON block MUST come BEFORE the HTML summary. Always include the symbol in the JSON block.
+IMPORTANT:
+- The JSON block MUST come BEFORE the HTML summary
+- Always include the symbol in the JSON block
+- The "rules" array in JSON MUST contain the strategy logic (entry/exit conditions)
+- The HTML Strategy Rules section MUST match the rules in the JSON block
 
 STEP 3 - EXECUTE ON APPROVAL:
 - When the user approves (says "yes", "ok", "go ahead", "run it", etc.), GENERATE and output the Python code
@@ -696,6 +700,18 @@ CRITICAL RULES:
                     if ind_period:
                         indicators_display += f"  <li>{ind_type}({ind_period})</li>\n"
 
+            # Build strategy rules list for display
+            rules_display = ""
+            if param_update.get("rules"):
+                for rule in param_update["rules"]:
+                    # Color code entry/exit rules
+                    if rule.lower().startswith("entry"):
+                        rules_display += f'  <li><b style="color: #089981;">Entry:</b> {rule[6:].strip() if rule.lower().startswith("entry:") else rule}</li>\n'
+                    elif rule.lower().startswith("exit"):
+                        rules_display += f'  <li><b style="color: #f23645;">Exit:</b> {rule[5:].strip() if rule.lower().startswith("exit:") else rule}</li>\n'
+                    else:
+                        rules_display += f"  <li>{rule}</li>\n"
+
             retry_message = f"""```json
 {json.dumps(param_update, indent=2)}
 ```
@@ -708,7 +724,11 @@ CRITICAL RULES:
   <span style="color: #787b86;">Initial Capital:</span> <b style="color: #089981;">${initial_capital:,}</b><br>
   <span style="color: #787b86;">Commission:</span> <b style="color: #f23645;">{commission}</b>
 </div>
-{f'<h4 style="margin: 0 0 10px 0; color: #d1d4dc;">Indicators Used</h4><ul style="margin: 0 0 15px 20px; color: #d1d4dc;">{indicators_display}</ul>' if indicators_display else ''}
+{f'<h4 style="margin: 0 0 10px 0; color: #d1d4dc;">Indicators</h4><ul style="margin: 0 0 15px 20px; color: #d1d4dc;">{indicators_display}</ul>' if indicators_display else ''}
+<h4 style="margin: 0 0 10px 0; color: #d1d4dc;">Strategy Rules</h4>
+<ul style="margin: 0 0 15px 20px; color: #d1d4dc;">
+{rules_display if rules_display else '  <li>Rules as described in conversation</li>'}
+</ul>
 <b style="color: #089981;">Should I run this backtest now?</b>"""
 
             return {
