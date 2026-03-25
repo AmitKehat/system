@@ -519,6 +519,19 @@ function EquityChart({ results, theme, onTradeClick, initialCapital }) {
   const buyHoldSeriesRef = useRef(null);
   const markersPluginRef = useRef(null);
 
+  // Refs to avoid stale closures in click handler
+  const resultsRef = useRef(results);
+  const onTradeClickRef = useRef(onTradeClick);
+
+  // Keep refs updated when props change
+  useEffect(() => {
+    resultsRef.current = results;
+  }, [results]);
+
+  useEffect(() => {
+    onTradeClickRef.current = onTradeClick;
+  }, [onTradeClick]);
+
   const { showBuyHoldComparison, toggleBuyHoldComparison, selectedTradeIndex } = useSimulatorStore();
 
   // Process equity curve data - normalize to start at initial capital
@@ -665,22 +678,23 @@ function EquityChart({ results, theme, onTradeClick, initialCapital }) {
       lastValueVisible: false,
     });
 
-    // Click handler for trade markers
+    // Click handler for trade markers - uses refs to avoid stale closures
     chart.subscribeClick((param) => {
       if (!param.point || !param.time) return;
 
       // Find if click is near a trade marker (check both entry and exit times)
       const clickTime = param.time;
-      if (results?.trades_detailed) {
-        for (let i = 0; i < results.trades_detailed.length; i++) {
-          const trade = results.trades_detailed[i];
+      const currentResults = resultsRef.current;
+      if (currentResults?.trades_detailed) {
+        for (let i = 0; i < currentResults.trades_detailed.length; i++) {
+          const trade = currentResults.trades_detailed[i];
 
           // Check entry time
           if (trade.entry_time) {
             const entryDate = new Date(trade.entry_time * 1000);
             const entryDateStr = entryDate.toISOString().split('T')[0];
             if (entryDateStr === clickTime) {
-              onTradeClick(i);
+              onTradeClickRef.current(i);
               return;
             }
           }
@@ -690,7 +704,7 @@ function EquityChart({ results, theme, onTradeClick, initialCapital }) {
             const exitDate = new Date(trade.exit_time * 1000);
             const exitDateStr = exitDate.toISOString().split('T')[0];
             if (exitDateStr === clickTime) {
-              onTradeClick(i);
+              onTradeClickRef.current(i);
               return;
             }
           }
