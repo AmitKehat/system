@@ -755,12 +755,24 @@ CRITICAL RULES:
 
     # We have code - run the backtest!
     # Extract indicators from code to determine warmup period
-    code_indicators = extract_indicators_from_code(strategy_code)
+    print(f"[SIMULATOR DEBUG] Starting backtest preparation...")
+    print(f"[SIMULATOR DEBUG] Strategy code length: {len(strategy_code)}")
+
+    try:
+        code_indicators = extract_indicators_from_code(strategy_code)
+        print(f"[SIMULATOR DEBUG] Extracted code indicators: {code_indicators}")
+    except Exception as e:
+        print(f"[SIMULATOR DEBUG] ERROR extracting indicators: {e}")
+        raise HTTPException(status_code=500, detail=f"Indicator extraction error: {str(e)}")
+
     llm_indicators = []
     if param_update and "indicators" in param_update:
         llm_indicators = param_update["indicators"]
+    print(f"[SIMULATOR DEBUG] LLM indicators: {llm_indicators}")
+
     all_indicators = llm_indicators + code_indicators
     max_period = get_max_indicator_period(all_indicators, strategy_code)
+    print(f"[SIMULATOR DEBUG] Max indicator period: {max_period}")
 
     try:
         start_date = req.parameters.get("startDate", "2023-01-01")
@@ -781,13 +793,18 @@ CRITICAL RULES:
         warmup_start_str = warmup_start_date.strftime('%Y-%m-%d')
 
         print(f"[SIMULATOR] Running backtest for {req.symbol} ({start_date} to {end_date}), warmup: {warmup_days} days")
+        print(f"[SIMULATOR DEBUG] Fetching data from yfinance: {req.symbol} from {warmup_start_str} to {end_date}")
         df = yf.download(req.symbol, start=warmup_start_str, end=end_date, progress=False)
+        print(f"[SIMULATOR DEBUG] Data fetched, shape: {df.shape}")
 
         if df.empty:
             raise ValueError(f"No data fetched for {req.symbol}")
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
     except Exception as e:
+        print(f"[SIMULATOR DEBUG] ERROR in data fetch: {e}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Data fetch error: {str(e)}")
 
     # Setup execution environment
@@ -812,12 +829,17 @@ def RSI(values, n):
     return 100 - (100 / (1 + rs))
 """
     try:
+        print(f"[SIMULATOR DEBUG] Compiling strategy code...")
         exec(setup_code, exec_env, exec_env)
         exec(strategy_code, exec_env, exec_env)
         CustomStrategy = exec_env.get("CustomStrategy")
         if not CustomStrategy:
             raise ValueError("LLM did not produce a class named 'CustomStrategy'")
+        print(f"[SIMULATOR DEBUG] Strategy compiled successfully")
     except Exception as e:
+        print(f"[SIMULATOR DEBUG] ERROR compiling strategy: {e}")
+        import traceback
+        traceback.print_exc()
         error_msg = f"Failed to compile strategy code.\nError: {str(e)}\n\nCode generated:\n{strategy_code}"
         return {"status": "error", "message": error_msg, "param_update": param_update}
 
@@ -831,8 +853,10 @@ def RSI(values, n):
         if param_update and "commission" in param_update:
             comm = float(param_update["commission"])
 
+        print(f"[SIMULATOR DEBUG] Running backtest with cash={cash}, commission={comm}")
         bt = Backtest(df, CustomStrategy, cash=cash, commission=comm, exclusive_orders=True)
         stats = bt.run()
+        print(f"[SIMULATOR DEBUG] Backtest completed successfully")
 
         trades_df = stats['_trades']
 
@@ -1084,7 +1108,6 @@ def RSI(values, n):
         print(f"[SIMULATOR DEBUG] ========== DATA SENT TO FRONTEND ==========")
         print(f"[SIMULATOR DEBUG] trade_markers count: {len(trade_markers)}")
         for i, m in enumerate(trade_markers):
-            from datetime import datetime
             ts = datetime.fromtimestamp(m['time']).strftime('%Y-%m-%d %H:%M')
             print(f"[SIMULATOR DEBUG] Marker {i}: time={ts}, type={m['type']}, price={m.get('price')}, open={m.get('open', False)}")
         print(f"[SIMULATOR DEBUG] trades_detailed count: {len(trades_detailed)}")
