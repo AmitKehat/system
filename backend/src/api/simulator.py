@@ -807,8 +807,13 @@ CRITICAL RULES:
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Data fetch error: {str(e)}")
 
-    # Setup execution environment
+    # Setup execution environment with trading gate to prevent warmup trades
     exec_env = {}
+
+    # Pass the actual start date to the execution environment
+    # This will be used to block trades during the warmup period
+    exec_env['_TRADING_START_DATE'] = pd.Timestamp(actual_start_date)
+
     setup_code = """
 import pandas as pd
 import numpy as np
@@ -827,9 +832,47 @@ def RSI(values, n):
     loss = (-delta.where(delta < 0, 0)).rolling(window=n).mean()
     rs = gain / loss
     return 100 - (100 / (1 + rs))
+
+# Trading gate: Prevents trading during warmup period
+# The warmup period is ONLY for indicator calculation, not execution
+class TradingGatedStrategy(Strategy):
+    '''Base class that blocks trading before the actual backtest start date.'''
+
+    def _is_trading_allowed(self):
+        '''Check if current bar is within the actual trading period.'''
+        current_time = self.data.index[-1]
+        # Convert to timestamp if needed for comparison
+        if hasattr(current_time, 'to_pydatetime'):
+            current_time = current_time.to_pydatetime()
+        trading_start = _TRADING_START_DATE
+        if hasattr(trading_start, 'to_pydatetime'):
+            trading_start = trading_start.to_pydatetime()
+        # Make both timezone-naive for comparison
+        if hasattr(current_time, 'tzinfo') and current_time.tzinfo is not None:
+            current_time = current_time.replace(tzinfo=None)
+        if hasattr(trading_start, 'tzinfo') and trading_start.tzinfo is not None:
+            trading_start = trading_start.replace(tzinfo=None)
+        return current_time >= trading_start
+
+    def buy(self, **kwargs):
+        '''Only allow buy if within trading period.'''
+        if self._is_trading_allowed():
+            return super().buy(**kwargs)
+        return None
+
+    def sell(self, **kwargs):
+        '''Only allow sell if within trading period.'''
+        if self._is_trading_allowed():
+            return super().sell(**kwargs)
+        return None
+
+# Alias so LLM-generated code that inherits from Strategy uses our gated version
+_OriginalStrategy = Strategy
+Strategy = TradingGatedStrategy
 """
     try:
         print(f"[SIMULATOR DEBUG] Compiling strategy code...")
+        print(f"[SIMULATOR DEBUG] Trading start date gate: {actual_start_date}")
         exec(setup_code, exec_env, exec_env)
         exec(strategy_code, exec_env, exec_env)
         CustomStrategy = exec_env.get("CustomStrategy")
@@ -1225,8 +1268,12 @@ async def rerun_simulation(req: RerunRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Data fetch error: {str(e)}")
 
-    # Setup execution environment
+    # Setup execution environment with trading gate to prevent warmup trades
     exec_env = {}
+
+    # Pass the actual start date to the execution environment
+    exec_env['_TRADING_START_DATE'] = pd.Timestamp(actual_start_date)
+
     setup_code = """
 import pandas as pd
 import numpy as np
@@ -1245,6 +1292,33 @@ def RSI(values, n):
     loss = (-delta.where(delta < 0, 0)).rolling(window=n).mean()
     rs = gain / loss
     return 100 - (100 / (1 + rs))
+
+# Trading gate: Prevents trading during warmup period
+class TradingGatedStrategy(Strategy):
+    def _is_trading_allowed(self):
+        current_time = self.data.index[-1]
+        if hasattr(current_time, 'to_pydatetime'):
+            current_time = current_time.to_pydatetime()
+        trading_start = _TRADING_START_DATE
+        if hasattr(trading_start, 'to_pydatetime'):
+            trading_start = trading_start.to_pydatetime()
+        if hasattr(current_time, 'tzinfo') and current_time.tzinfo is not None:
+            current_time = current_time.replace(tzinfo=None)
+        if hasattr(trading_start, 'tzinfo') and trading_start.tzinfo is not None:
+            trading_start = trading_start.replace(tzinfo=None)
+        return current_time >= trading_start
+
+    def buy(self, **kwargs):
+        if self._is_trading_allowed():
+            return super().buy(**kwargs)
+        return None
+
+    def sell(self, **kwargs):
+        if self._is_trading_allowed():
+            return super().sell(**kwargs)
+        return None
+
+Strategy = TradingGatedStrategy
 """
     try:
         exec(setup_code, exec_env, exec_env)
