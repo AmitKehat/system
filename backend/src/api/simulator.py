@@ -873,23 +873,37 @@ def RSI(values, n):
 
         # Filter trades to only include those within the requested date range
         # (exclude warmup period trades)
+        # IMPORTANT: Include trades where EITHER entry OR exit is in the actual period
+        # This handles trades that entered during warmup but were held into the actual period
         if not trades_df.empty and warmup_days > 0:
             actual_start_dt = pd.Timestamp(actual_start_date).tz_localize(None)
             original_count = len(trades_df)
 
-            # Make sure EntryTime is also timezone-naive for comparison
+            # Make sure times are timezone-naive for comparison
             trades_df_copy = trades_df.copy()
             if trades_df_copy['EntryTime'].dt.tz is not None:
                 trades_df_copy['EntryTime'] = trades_df_copy['EntryTime'].dt.tz_localize(None)
+            if trades_df_copy['ExitTime'].dt.tz is not None:
+                trades_df_copy['ExitTime'] = trades_df_copy['ExitTime'].dt.tz_localize(None)
 
             # DEBUG: Show which trades pass/fail the filter
             print(f"[SIMULATOR DEBUG] ========== TRADE FILTERING ==========")
             for idx, row in trades_df_copy.iterrows():
                 entry_ts = row['EntryTime']
-                passes = entry_ts >= actual_start_dt
-                print(f"[SIMULATOR DEBUG] Trade {idx}: Entry={entry_ts} >= {actual_start_dt} ? {passes}")
+                exit_ts = row['ExitTime']
+                entry_passes = entry_ts >= actual_start_dt
+                exit_passes = exit_ts >= actual_start_dt
+                passes = entry_passes or exit_passes
+                print(f"[SIMULATOR DEBUG] Trade {idx}: Entry={entry_ts}, Exit={exit_ts}")
+                print(f"[SIMULATOR DEBUG]   Entry >= {actual_start_dt} ? {entry_passes}")
+                print(f"[SIMULATOR DEBUG]   Exit >= {actual_start_dt} ? {exit_passes}")
+                print(f"[SIMULATOR DEBUG]   Include trade? {passes}")
 
-            trades_df = trades_df[trades_df_copy['EntryTime'] >= actual_start_dt]
+            # Include trades where entry OR exit is within the actual period
+            trades_df = trades_df[
+                (trades_df_copy['EntryTime'] >= actual_start_dt) |
+                (trades_df_copy['ExitTime'] >= actual_start_dt)
+            ]
             print(f"[SIMULATOR DEBUG] Filtered trades: {original_count} -> {len(trades_df)}")
 
         # DEBUG: Print trades AFTER filtering
