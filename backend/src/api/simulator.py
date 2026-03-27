@@ -888,22 +888,17 @@ def RSI(values, n):
 
             # DEBUG: Show which trades pass/fail the filter
             print(f"[SIMULATOR DEBUG] ========== TRADE FILTERING ==========")
+            print(f"[SIMULATOR DEBUG] Only including trades where ENTRY >= {actual_start_dt}")
             for idx, row in trades_df_copy.iterrows():
                 entry_ts = row['EntryTime']
                 exit_ts = row['ExitTime']
                 entry_passes = entry_ts >= actual_start_dt
-                exit_passes = exit_ts >= actual_start_dt
-                passes = entry_passes or exit_passes
                 print(f"[SIMULATOR DEBUG] Trade {idx}: Entry={entry_ts}, Exit={exit_ts}")
-                print(f"[SIMULATOR DEBUG]   Entry >= {actual_start_dt} ? {entry_passes}")
-                print(f"[SIMULATOR DEBUG]   Exit >= {actual_start_dt} ? {exit_passes}")
-                print(f"[SIMULATOR DEBUG]   Include trade? {passes}")
+                print(f"[SIMULATOR DEBUG]   Entry >= {actual_start_dt} ? {entry_passes} -> {'INCLUDE' if entry_passes else 'EXCLUDE (warmup trade)'}")
 
-            # Include trades where entry OR exit is within the actual period
-            trades_df = trades_df[
-                (trades_df_copy['EntryTime'] >= actual_start_dt) |
-                (trades_df_copy['ExitTime'] >= actual_start_dt)
-            ]
+            # Only include trades where ENTRY is within the actual period
+            # Trades that started during warmup should NOT be counted - warmup is only for indicator calculation
+            trades_df = trades_df[trades_df_copy['EntryTime'] >= actual_start_dt]
             print(f"[SIMULATOR DEBUG] Filtered trades: {original_count} -> {len(trades_df)}")
 
         # DEBUG: Print trades AFTER filtering
