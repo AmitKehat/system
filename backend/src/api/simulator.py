@@ -836,6 +836,17 @@ def RSI(values, n):
 
         trades_df = stats['_trades']
 
+        # DEBUG: Print all trades BEFORE filtering
+        print(f"[SIMULATOR DEBUG] ========== ALL TRADES (before filtering) ==========")
+        print(f"[SIMULATOR DEBUG] Total trades from backtest: {len(trades_df)}")
+        print(f"[SIMULATOR DEBUG] Actual start date for filtering: {actual_start_date}")
+        print(f"[SIMULATOR DEBUG] Warmup days: {warmup_days}")
+        if not trades_df.empty:
+            for idx, row in trades_df.iterrows():
+                entry_ts = row['EntryTime']
+                exit_ts = row['ExitTime']
+                print(f"[SIMULATOR DEBUG] Trade {idx}: Entry={entry_ts}, Exit={exit_ts}, Size={row['Size']}, PnL={row['PnL']:.2f}")
+
         # Filter trades to only include those within the requested date range
         # (exclude warmup period trades)
         if not trades_df.empty and warmup_days > 0:
@@ -847,9 +858,22 @@ def RSI(values, n):
             if trades_df_copy['EntryTime'].dt.tz is not None:
                 trades_df_copy['EntryTime'] = trades_df_copy['EntryTime'].dt.tz_localize(None)
 
+            # DEBUG: Show which trades pass/fail the filter
+            print(f"[SIMULATOR DEBUG] ========== TRADE FILTERING ==========")
+            for idx, row in trades_df_copy.iterrows():
+                entry_ts = row['EntryTime']
+                passes = entry_ts >= actual_start_dt
+                print(f"[SIMULATOR DEBUG] Trade {idx}: Entry={entry_ts} >= {actual_start_dt} ? {passes}")
+
             trades_df = trades_df[trades_df_copy['EntryTime'] >= actual_start_dt]
-            if original_count != len(trades_df):
-                print(f"[SIMULATOR] Filtered trades: {original_count} -> {len(trades_df)}")
+            print(f"[SIMULATOR DEBUG] Filtered trades: {original_count} -> {len(trades_df)}")
+
+        # DEBUG: Print trades AFTER filtering
+        print(f"[SIMULATOR DEBUG] ========== FILTERED TRADES (after filtering) ==========")
+        print(f"[SIMULATOR DEBUG] Trades after filtering: {len(trades_df)}")
+        if not trades_df.empty:
+            for idx, row in trades_df.iterrows():
+                print(f"[SIMULATOR DEBUG] Trade {idx}: Entry={row['EntryTime']}, Exit={row['ExitTime']}, PnL={row['PnL']:.2f}")
 
         # Check for open position at end of backtest
         # backtesting.py tracks this in the equity curve - if final equity differs from
@@ -1055,6 +1079,20 @@ def RSI(values, n):
             trades_detailed = calculate_trade_excursions(df, trades_df, cash)
             profitable_count = sum(1 for t in trades_detailed if t['pnl_usd'] > 0)
             losing_count = sum(1 for t in trades_detailed if t['pnl_usd'] < 0)
+
+        # DEBUG: Print what's being sent to frontend
+        print(f"[SIMULATOR DEBUG] ========== DATA SENT TO FRONTEND ==========")
+        print(f"[SIMULATOR DEBUG] trade_markers count: {len(trade_markers)}")
+        for i, m in enumerate(trade_markers):
+            from datetime import datetime
+            ts = datetime.fromtimestamp(m['time']).strftime('%Y-%m-%d %H:%M')
+            print(f"[SIMULATOR DEBUG] Marker {i}: time={ts}, type={m['type']}, price={m.get('price')}, open={m.get('open', False)}")
+        print(f"[SIMULATOR DEBUG] trades_detailed count: {len(trades_detailed)}")
+        for i, t in enumerate(trades_detailed):
+            entry_dt = datetime.fromtimestamp(t['entry_time']).strftime('%Y-%m-%d')
+            exit_dt = datetime.fromtimestamp(t['exit_time']).strftime('%Y-%m-%d') if t.get('exit_time') else 'N/A'
+            print(f"[SIMULATOR DEBUG] Trade {i}: #{t['trade_num']} Entry={entry_dt}, Exit={exit_dt}, PnL=${t['pnl_usd']:.2f}")
+        print(f"[SIMULATOR DEBUG] ================================================")
 
         # Calculate Buy & Hold comparison
         buy_hold_return_pct, buy_hold_equity_curve = calculate_buy_hold(df, cash, start_date, end_date)
